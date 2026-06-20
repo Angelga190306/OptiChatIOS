@@ -1,0 +1,17 @@
+{
+  "project": "OptiChatIOS",
+  "platform": "ios",
+  "github": {
+    "owner": "Angelga190306",
+    "repo": "OptiChatIOS"
+  },
+  "ios": {
+    "path": "ios",
+    "scheme": "OptiChatIOS",
+    "signing": false
+  },
+  "mobai": {
+    "url": "http://localhost:8686",
+    "device_id": ""
+  }
+}
