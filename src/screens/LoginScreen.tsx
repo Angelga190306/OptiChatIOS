@@ -1,7 +1,24 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, FlatList } from 'react-native';
 import { useAuthStore } from '../store/useAuthStore';
 import { fetchApi } from '../lib/api';
+
+const COUNTRIES = [
+  { name: 'México', code: '+52', flag: '🇲🇽' },
+  { name: 'Estados Unidos', code: '+1', flag: '🇺🇸' },
+  { name: 'España', code: '+34', flag: '🇪🇸' },
+  { name: 'Argentina', code: '+54', flag: '🇦🇷' },
+  { name: 'Colombia', code: '+57', flag: '🇨🇴' },
+  { name: 'Chile', code: '+56', flag: '🇨🇱' },
+  { name: 'Perú', code: '+51', flag: '🇵🇪' },
+  { name: 'Ecuador', code: '+593', flag: '🇪🇨' },
+  { name: 'Venezuela', code: '+58', flag: '🇻🇪' },
+  { name: 'Brasil', code: '+55', flag: '🇧🇷' },
+  { name: 'Reino Unido', code: '+44', flag: '🇬🇧' },
+  { name: 'Alemania', code: '+49', flag: '🇩🇪' },
+  { name: 'Francia', code: '+33', flag: '🇫🇷' },
+  { name: 'Italia', code: '+39', flag: '🇮🇹' },
+];
 
 export default function LoginScreen() {
   const [step, setStep] = useState<1 | 2>(1);
@@ -9,6 +26,9 @@ export default function LoginScreen() {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const handleSendCode = async () => {
     if (phoneNumber.length < 10) {
@@ -18,7 +38,7 @@ export default function LoginScreen() {
     try {
       setLoading(true);
       setError('');
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : '+52' + phoneNumber;
+      const formattedPhone = selectedCountry.code + phoneNumber;
       const res = await fetchApi('/auth/send-code', {
         method: 'POST',
         body: JSON.stringify({ phoneNumber: formattedPhone }),
@@ -45,7 +65,7 @@ export default function LoginScreen() {
     try {
       setLoading(true);
       setError('');
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : '+52' + phoneNumber;
+      const formattedPhone = selectedCountry.code + phoneNumber;
       const res = await fetchApi('/auth/verify-code', {
         method: 'POST',
         body: JSON.stringify({ 
@@ -77,12 +97,20 @@ export default function LoginScreen() {
         {step === 1 ? (
           <>
             <Text style={styles.subtitle}>Ingresa tu número de teléfono</Text>
+            
+            <TouchableOpacity style={styles.countrySelector} onPress={() => setModalVisible(true)}>
+              <Text style={styles.countrySelectorText}>
+                {selectedCountry.flag} {selectedCountry.name} ({selectedCountry.code})
+              </Text>
+              <Text style={styles.dropdownArrow}>▼</Text>
+            </TouchableOpacity>
+
             <TextInput
               style={styles.input}
-              placeholder="55 1234 5678"
+              placeholder="1234 5678"
               placeholderTextColor="#666"
               value={phoneNumber}
-              onChangeText={(text) => setPhoneNumber(text.replace(/[^0-9+]/g, ''))}
+              onChangeText={(text) => setPhoneNumber(text.replace(/[^0-9]/g, ''))}
               keyboardType="phone-pad"
             />
             
@@ -133,6 +161,35 @@ export default function LoginScreen() {
           </>
         )}
       </View>
+
+      <Modal visible={modalVisible} animationType="slide" transparent={true}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Selecciona tu país</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Text style={styles.closeText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={COUNTRIES}
+              keyExtractor={(item) => item.code + item.name}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.countryItem}
+                  onPress={() => {
+                    setSelectedCountry(item);
+                    setModalVisible(false);
+                  }}
+                >
+                  <Text style={styles.countryItemText}>{item.flag} {item.name}</Text>
+                  <Text style={styles.countryItemCode}>{item.code}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -167,6 +224,24 @@ const styles = StyleSheet.create({
     elevation: 5,
     gap: 15,
   },
+  countrySelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 15,
+    borderRadius: 8,
+    backgroundColor: '#fafafa',
+  },
+  countrySelectorText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    color: '#666',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
@@ -195,5 +270,46 @@ const styles = StyleSheet.create({
     color: 'red',
     textAlign: 'center',
     fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  closeText: {
+    color: '#0066cc',
+    fontWeight: 'bold',
+  },
+  countryItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  countryItemText: {
+    fontSize: 16,
+  },
+  countryItemCode: {
+    fontSize: 16,
+    color: '#666',
   },
 });

@@ -8,7 +8,7 @@ import { RootStackParamList } from '../../App';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
-export default function HomeScreen() {
+export default function ChatsTab() {
   const { chats, loadChats, isLoadingChats, setActiveChat } = useChatStore();
   const { user, logout } = useAuthStore();
   const navigation = useNavigation<NavigationProp>();

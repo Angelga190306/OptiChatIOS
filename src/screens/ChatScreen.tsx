@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useLayoutEffect } from 'react';
-import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import { useChatStore } from '../store/useChatStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
@@ -82,6 +82,26 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: any }) => {
     const isMe = item.senderId === user?.id;
+    
+    // Si es viewOnce y no soy yo quien lo mandó, mostrar un placeholder o el contenido si no se ha visto
+    // Para simplificar, si es viewOnce, solo mostramos un botón de "Foto (1)"
+    if (item.viewOnce) {
+      return (
+        <View style={[styles.messageBubble, isMe ? styles.messageMe : styles.messageThem]}>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', padding: 5 }}>
+            <Icon name={item.type === 'VIDEO' ? 'videocam' : item.type === 'AUDIO' ? 'mic' : 'image'} size={24} color="#0066cc" />
+            <Text style={[styles.messageText, { fontStyle: 'italic', marginLeft: 8, color: '#0066cc' }]}>
+              {item.type === 'AUDIO' ? 'Mensaje de voz' : item.type === 'VIDEO' ? 'Video' : 'Foto'} (Ver una sola vez)
+            </Text>
+          </TouchableOpacity>
+          <Text style={styles.timeText}>
+            {new Date(item.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+            {isMe && <Text style={{ color: item.read ? '#34B7F1' : '#888' }}> ✓✓</Text>}
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <View style={[styles.messageBubble, isMe ? styles.messageMe : styles.messageThem]}>
         {item.type === 'AUDIO' ? (
@@ -92,16 +112,15 @@ export default function ChatScreen() {
             paused
           />
         ) : item.type === 'IMAGE' ? (
-          <Video
+          <Image
             source={{ uri: item.mediaUrl }}
-            style={{ width: 200, height: 200 }}
-            paused
+            style={{ width: 200, height: 200, borderRadius: 8 }}
           />
         ) : item.type === 'VIDEO' ? (
           <Video
             source={{ uri: item.mediaUrl }}
             controls
-            style={{ width: 200, height: 200 }}
+            style={{ width: 200, height: 200, borderRadius: 8 }}
             paused
           />
         ) : (
@@ -109,6 +128,7 @@ export default function ChatScreen() {
         )}
         <Text style={styles.timeText}>
           {new Date(item.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+          {isMe && <Text style={{ color: item.read ? '#34B7F1' : '#888' }}> ✓✓</Text>}
         </Text>
       </View>
     );
