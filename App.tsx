@@ -1,46 +1,99 @@
-import React from 'react';
-import { StatusBar, StyleSheet, Text, View, useColorScheme } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { StatusBar } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+import LoginScreen from './src/screens/LoginScreen';
+import HomeScreen from './src/screens/HomeScreen';
+import ChatScreen from './src/screens/ChatScreen';
+
+import { useAuthStore } from './src/store/useAuthStore';
+import { useSocketStore } from './src/store/useSocketStore';
+import { useWebRTCStore } from './src/store/useWebRTCStore';
+import { ActiveCallView } from './src/components/chat/ActiveCallView';
+
+export type RootStackParamList = {
+  Login: undefined;
+  Home: undefined;
+  Chat: { chatId: string; chatName: string };
+};
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function App() {
-  const isDarkMode = useColorScheme() === 'dark';
+  const { user, accessToken } = useAuthStore();
+  const { connect, disconnect } = useSocketStore();
+  
+  const {
+    callState,
+    callerName,
+    isVideoCall,
+    localStream,
+    remoteStream,
+    isMuted,
+    isVideoOff,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    toggleVideo,
+    setupSocketListeners,
+    removeSocketListeners
+  } = useWebRTCStore();
+
+  useEffect(() => {
+    if (user && accessToken) {
+      connect();
+      // Pequeño delay para asegurar que el socket está conectado antes de configurar listeners
+      setTimeout(() => {
+        setupSocketListeners();
+      }, 500);
+    } else {
+      removeSocketListeners();
+      disconnect();
+    }
+    return () => removeSocketListeners();
+  }, [user, accessToken]);
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? '#000' : '#fff' }]}>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: isDarkMode ? '#fff' : '#000' }]}>
-            OptiChat iOS
-          </Text>
-          <Text style={[styles.subtitle, { color: isDarkMode ? '#aaa' : '#666' }]}>
-            Hot Reload activado con ios-builder
-          </Text>
-        </View>
-      </SafeAreaView>
+      <NavigationContainer>
+        <StatusBar barStyle="dark-content" />
+        <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: '#0066cc' }, headerTintColor: '#fff' }}>
+        {!user ? (
+          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        ) : (
+          <>
+            <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'OptiChat' }} />
+            <Stack.Screen 
+              name="Chat" 
+              component={ChatScreen} 
+              options={({ route }) => ({ title: route.params.chatName })} 
+            />
+          </>
+        )}
+      </Stack.Navigator>
+      
+      {user && callState !== 'idle' && (
+        <ActiveCallView
+          callState={callState}
+          callerName={callerName}
+          isVideoCall={isVideoCall}
+          localStream={localStream}
+          remoteStream={remoteStream}
+          isMuted={isMuted}
+          isVideoOff={isVideoOff}
+          onAccept={acceptCall}
+          onReject={rejectCall}
+          onEnd={endCall}
+          onToggleMute={toggleMute}
+          onToggleVideo={toggleVideo}
+        />
+      )}
+    </NavigationContainer>
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    padding: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-  },
-});
 
 export default App;
