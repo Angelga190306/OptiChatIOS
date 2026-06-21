@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { RTCView, MediaStream } from 'react-native-webrtc';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { CallState } from '../../store/useWebRTCStore';
@@ -12,14 +12,14 @@ interface ActiveCallViewProps {
   remoteStream: MediaStream | null;
   isMuted: boolean;
   isVideoOff: boolean;
+  videoUpgradePending: boolean;
   onAccept: () => void;
   onReject: () => void;
   onEnd: () => void;
   onToggleMute: () => void;
   onToggleVideo: () => void;
+  onRequestVideoUpgrade: () => void;
 }
-
-const { width, height } = Dimensions.get('window');
 
 export function ActiveCallView({
   callState,
@@ -29,11 +29,13 @@ export function ActiveCallView({
   remoteStream,
   isMuted,
   isVideoOff,
+  videoUpgradePending,
   onAccept,
   onReject,
   onEnd,
   onToggleMute,
-  onToggleVideo
+  onToggleVideo,
+  onRequestVideoUpgrade,
 }: ActiveCallViewProps) {
   if (callState === 'idle') return null;
 
@@ -71,7 +73,8 @@ export function ActiveCallView({
         <Text style={styles.callerName}>{callerName}</Text>
         <Text style={styles.statusText}>
           {callState === 'ringing' ? 'Llamada entrante...' : 
-           callState === 'calling' ? 'Llamando...' : 'En llamada'}
+           callState === 'calling' ? 'Llamando...' :
+           callState === 'ringback' ? 'Sonando...' : 'En llamada'}
         </Text>
       </View>
 
@@ -101,6 +104,16 @@ export function ActiveCallView({
                 onPress={onToggleVideo}
               >
                 <Icon name={isVideoOff ? "videocam-off" : "videocam"} size={28} color="#fff" />
+              </TouchableOpacity>
+            )}
+
+            {!isVideoCall && callState === 'active' && (
+              <TouchableOpacity
+                disabled={videoUpgradePending}
+                style={[styles.button, styles.buttonNormal, videoUpgradePending && { opacity: 0.5 }]}
+                onPress={onRequestVideoUpgrade}
+              >
+                <Icon name="videocam" size={28} color="#fff" />
               </TouchableOpacity>
             )}
 

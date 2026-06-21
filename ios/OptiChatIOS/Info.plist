@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>OptiChatIOS</string>
+	<string>OptiChat</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -34,12 +34,21 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
 	<key>NSCameraUsageDescription</key>
-	<string>OptiChat necesita acceso a la cámara para realizar videollamadas.</string>
+	<string>OptiChat necesita acceso a la cámara para realizar videollamadas y compartir fotos.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>OptiChat necesita acceso al micrófono para realizar llamadas y enviar notas de voz.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>OptiChat necesita acceso a tus fotos para compartir imágenes y videos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>OptiChat necesita permiso para guardar imágenes y videos en Fotos.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>remote-notification</string>
+	</array>
+	<key>NSFileProtectionCompleteUntilFirstUserAuthentication</key>
+	<true/>
 	<key>UIAppFonts</key>
 	<array>
 		<string>MaterialIcons.ttf</string>

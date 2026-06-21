@@ -1,91 +1,40 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { fetchApi } from '../lib/api';
-import { useAuthStore } from '../store/useAuthStore';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { fetchJson } from '../lib/api';
+import { resolveMediaUrl } from '../lib/offlineFiles';
+import { useSocketStore } from '../store/useSocketStore';
+import { useWebRTCStore } from '../store/useWebRTCStore';
+import { CallHistoryItem } from '../types';
 
 export default function CallsTab() {
-  const [calls, setCalls] = useState<any[]>([]);
+  const [calls, setCalls] = useState<CallHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const { user } = useAuthStore();
-
-  const loadCalls = async () => {
-    try {
-      setLoading(true);
-      const res = await fetchApi('/calls/history');
-      if (res.ok) {
-        const data = await res.json();
-        setCalls(data || []);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+  const startCall = useWebRTCStore((state) => state.startCall);
+  const socket = useSocketStore((state) => state.socket);
+  const load = async () => {
+    try { setLoading(true); setCalls((await fetchJson<{ calls: CallHistoryItem[] }>('/calls/history')).calls || []); }
+    catch { /* mantener historial visible */ } finally { setLoading(false); }
   };
-
+  useEffect(() => { void load(); }, []);
   useEffect(() => {
-    loadCalls();
-  }, []);
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Llamadas</Text>
-      </View>
-      
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 20 }} color="#0066cc" />
-      ) : (
-        <FlatList
-          data={calls}
-          keyExtractor={(item) => item.id || Math.random().toString()}
-          refreshing={loading}
-          onRefresh={loadCalls}
-          renderItem={({ item }) => (
-            <View style={styles.callItem}>
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarText}>{item.callerName?.[0] || '?'}</Text>
-              </View>
-              <View style={styles.callInfo}>
-                <Text style={[styles.callName, item.missed && { color: 'red' }]}>
-                  {item.callerName || 'Desconocido'}
-                </Text>
-                <View style={styles.callDetailsRow}>
-                  <Text style={styles.callDetails}>
-                    {item.type === 'incoming' ? '↙ ' : '↗ '}
-                    {new Date(item.timestamp).toLocaleString()}
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity style={styles.callButton}>
-                <Text style={{ fontSize: 24 }}>📞</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>No tienes llamadas recientes.</Text>
-          }
-        />
-      )}
-    </SafeAreaView>
-  );
+    if (!socket) return;
+    const handler = () => void load();
+    socket.on('call-history-updated', handler);
+    return () => { socket.off('call-history-updated', handler); };
+  }, [socket]);
+  const subtitle = (call: CallHistoryItem) => {
+    const direction = call.direction === 'INCOMING' ? '↙' : '↗';
+    const state: Record<string, string> = { MISSED: 'Perdida', REJECTED: 'Rechazada', CANCELED: 'Cancelada', COMPLETED: 'Finalizada', ANSWERED: 'En curso', RINGING: 'Llamando' };
+    return `${direction} ${state[call.status] || call.status} · ${new Date(call.startedAt).toLocaleString()}`;
+  };
+  return <SafeAreaView style={styles.container} edges={['top']}><View style={styles.header}><Text style={styles.title}>Llamadas</Text></View>{loading && calls.length === 0 ? <ActivityIndicator style={{ marginTop: 30 }} color="#0066cc" /> : <FlatList data={calls} keyExtractor={(item) => item.id} onRefresh={() => void load()} refreshing={loading} renderItem={({ item }) => {
+    const uri = resolveMediaUrl(item.otherUser.avatarUrl);
+    const name = item.otherUser.displayName || item.otherUser.phoneNumber;
+    const missed = item.status === 'MISSED' && item.direction === 'INCOMING';
+    return <View style={styles.row}>{uri ? <Image source={{ uri }} style={styles.avatar} /> : <View style={styles.fallback}><Text style={styles.initial}>{name[0]}</Text></View>}<View style={{ flex: 1 }}><Text style={[styles.name, missed && { color: '#c62828' }]}>{name}</Text><Text style={styles.subtitle}>{subtitle(item)}</Text>{item.durationSeconds != null && <Text style={styles.duration}>{Math.floor(item.durationSeconds / 60)}:{String(item.durationSeconds % 60).padStart(2, '0')}</Text>}</View><TouchableOpacity onPress={() => void startCall(item.otherUser.id, name, item.type === 'VIDEO')}><Icon name={item.type === 'VIDEO' ? 'videocam' : 'call'} size={26} color="#0066cc" /></TouchableOpacity></View>;
+  }} ListEmptyComponent={<Text style={styles.empty}>No tienes llamadas recientes.</Text>} />}</SafeAreaView>;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { padding: 15, backgroundColor: '#f8f9fa', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#000' },
-  callItem: { flexDirection: 'row', padding: 15, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  avatarPlaceholder: {
-    width: 50, height: 50, borderRadius: 25, backgroundColor: '#ccc',
-    justifyContent: 'center', alignItems: 'center', marginRight: 15,
-  },
-  avatarText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  callInfo: { flex: 1 },
-  callName: { fontSize: 16, fontWeight: 'bold', color: '#000' },
-  callDetailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
-  callDetails: { fontSize: 13, color: '#666' },
-  callButton: { padding: 10 },
-  emptyText: { textAlign: 'center', marginTop: 40, color: '#999', fontSize: 16 },
-});
+const styles = StyleSheet.create({ container: { flex: 1, backgroundColor: '#fff' }, header: { padding: 15, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' }, title: { fontSize: 27, fontWeight: '800', color: '#111' }, row: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee', gap: 12 }, avatar: { width: 52, height: 52, borderRadius: 26 }, fallback: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#8ba4b8', alignItems: 'center', justifyContent: 'center' }, initial: { color: '#fff', fontSize: 20, fontWeight: '700' }, name: { fontSize: 17, fontWeight: '700', color: '#111' }, subtitle: { color: '#666', fontSize: 12, marginTop: 3 }, duration: { color: '#777', fontSize: 11, marginTop: 2 }, empty: { textAlign: 'center', marginTop: 50, color: '#777' } });

@@ -1,130 +1,52 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import AudioRecorderPlayer, {
-  AudioEncoderAndroidType,
-  AudioSourceAndroidType,
-  AVEncoderAudioQualityIOSType,
-  AVEncodingOption,
-} from 'react-native-audio-recorder-player';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import AudioRecorderPlayer, { AudioEncoderAndroidType, AudioSourceAndroidType, AVEncoderAudioQualityIOSType } from 'react-native-audio-recorder-player';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { useAuthStore } from '../../store/useAuthStore';
 
-interface VoiceRecorderProps {
-  onCancel: () => void;
-  onSend: (fileUri: string) => void;
-}
+interface Props { onSend: (fileUri: string, durationMs: number) => void; onCancel?: () => void; onRecordingChange?: (recording: boolean) => void; }
+const recorder = new (AudioRecorderPlayer as any)();
 
-const audioRecorderPlayer = new (AudioRecorderPlayer as any)();
-
-export function VoiceRecorder({ onCancel, onSend }: VoiceRecorderProps) {
-  const [isRecording, setIsRecording] = useState(false);
+export function VoiceRecorder({ onSend, onCancel, onRecordingChange }: Props) {
+  const [recording, setRecording] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [recordTime, setRecordTime] = useState('00:00');
-  const recordUri = useRef('');
+  const duration = useRef(0);
+  const recordingRef = useRef(false);
+  const lockedRef = useRef(false);
 
-  useEffect(() => {
-    startRecording();
-    return () => {
-      if (isRecording) {
-        audioRecorderPlayer.stopRecorder();
-      }
-    };
-  }, []);
-
-  const startRecording = async () => {
+  const updateRecording = (value: boolean) => { recordingRef.current = value; setRecording(value); onRecordingChange?.(value); };
+  const updateLocked = (value: boolean) => { lockedRef.current = value; setLocked(value); };
+  const start = async () => {
+    if (recordingRef.current) return;
     try {
-      const path = 'hello.m4a';
-      const audioSet = {
-        AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-        AudioSourceAndroid: AudioSourceAndroidType.MIC,
-        AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
-        AVNumberOfChannelsKeyIOS: 2,
-        AVFormatIDKeyIOS: 'aac',
-      };
-      const uri = await audioRecorderPlayer.startRecorder(path, audioSet);
-      recordUri.current = uri;
-      setIsRecording(true);
-      audioRecorderPlayer.addRecordBackListener((e: any) => {
-        setRecordTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)));
+      duration.current = 0; updateLocked(false); updateRecording(true);
+      await recorder.startRecorder(`voice-${Date.now()}.m4a`, {
+        AudioEncoderAndroid: AudioEncoderAndroidType.AAC, AudioSourceAndroid: AudioSourceAndroidType.MIC,
+        AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high, AVNumberOfChannelsKeyIOS: 1, AVFormatIDKeyIOS: 'aac',
       });
-    } catch (e) {
-      console.error('Error starting record', e);
-      onCancel();
-    }
+      recorder.addRecordBackListener((event: any) => { duration.current = Math.floor(event.currentPosition); setRecordTime(recorder.mmssss(duration.current)); });
+    } catch { updateRecording(false); onCancel?.(); }
   };
-
-  const stopAndSend = async () => {
-    try {
-      const result = await audioRecorderPlayer.stopRecorder();
-      audioRecorderPlayer.removeRecordBackListener();
-      setIsRecording(false);
-      onSend(result);
-    } catch (e) {
-      console.error('Error stopping record', e);
-      onCancel();
-    }
+  const finish = async (send: boolean) => {
+    if (!recordingRef.current) return;
+    try { const uri = await recorder.stopRecorder(); recorder.removeRecordBackListener(); const ms = duration.current; updateRecording(false); updateLocked(false); setRecordTime('00:00'); if (send && ms > 300) onSend(uri, ms); else onCancel?.(); }
+    catch { updateRecording(false); updateLocked(false); onCancel?.(); }
   };
+  useEffect(() => () => { if (recordingRef.current) void recorder.stopRecorder(); recorder.removeRecordBackListener(); }, []);
 
-  const cancelRecording = async () => {
-    try {
-      await audioRecorderPlayer.stopRecorder();
-      audioRecorderPlayer.removeRecordBackListener();
-    } catch (e) {}
-    setIsRecording(false);
-    onCancel();
-  };
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => { void start(); },
+    onPanResponderMove: (_, gesture) => { if (gesture.dy < -65 && recordingRef.current) updateLocked(true); },
+    onPanResponderRelease: () => { if (recordingRef.current && !lockedRef.current) void finish(true); },
+    onPanResponderTerminate: () => { if (recordingRef.current && !lockedRef.current) void finish(false); },
+  }), []);
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.timeContainer}>
-        <Icon name="mic" size={20} color="red" />
-        <Text style={styles.timeText}>{recordTime}</Text>
-      </View>
-      <View style={styles.controls}>
-        <TouchableOpacity onPress={cancelRecording} style={styles.cancelBtn}>
-          <Icon name="delete" size={24} color="#666" />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={stopAndSend} style={styles.sendBtn}>
-          <Icon name="send" size={20} color="#fff" />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  if (!recording) return <View {...panResponder.panHandlers} style={styles.mic}><Icon name="mic" size={23} color="#fff" /></View>;
+  return <View {...panResponder.panHandlers} style={styles.recording}>
+    <View style={styles.time}><Icon name="fiber-manual-record" size={16} color="#d32f2f" /><Text style={styles.timeText}>{recordTime}</Text></View>
+    {!locked ? <View style={styles.lockHint}><Icon name="lock" size={17} color="#777" /><Text style={styles.hint}>Desliza arriba para bloquear</Text></View> : <View style={styles.controls}><TouchableOpacity onPress={() => void finish(false)}><Icon name="delete" size={26} color="#666" /></TouchableOpacity><Icon name="lock" size={19} color="#0066cc" /><TouchableOpacity style={styles.send} onPress={() => void finish(true)}><Icon name="send" size={21} color="#fff" /></TouchableOpacity></View>}
+  </View>;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    minHeight: 40,
-  },
-  timeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  timeText: {
-    marginLeft: 5,
-    fontSize: 16,
-    color: '#000',
-  },
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cancelBtn: {
-    padding: 5,
-    marginRight: 10,
-  },
-  sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#0066cc',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+const styles = StyleSheet.create({ mic: { width: 42, height: 42, borderRadius: 21, marginLeft: 7, backgroundColor: '#0066cc', alignItems: 'center', justifyContent: 'center' }, recording: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff' }, time: { flexDirection: 'row', alignItems: 'center', gap: 5 }, timeText: { fontSize: 16, color: '#111', fontVariant: ['tabular-nums'] }, lockHint: { flexDirection: 'row', alignItems: 'center', gap: 5 }, hint: { color: '#777', fontSize: 12 }, controls: { flexDirection: 'row', alignItems: 'center', gap: 18 }, send: { width: 39, height: 39, borderRadius: 20, backgroundColor: '#0066cc', alignItems: 'center', justifyContent: 'center' } });

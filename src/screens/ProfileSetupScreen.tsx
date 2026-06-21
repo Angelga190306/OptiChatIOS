@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { fetchApi } from '../lib/api';
 
 export default function ProfileSetupScreen() {
-  const { user, updateUser } = useAuthStore();
+  const { updateUser } = useAuthStore();
   const [displayName, setDisplayName] = useState('');
   const [about, setAbout] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,7 @@ export default function ProfileSetupScreen() {
       setLoading(true);
       setError('');
       
-      const res = await fetchApi('/users/profile', {
+      const res = await fetchApi('/users/me', {
         method: 'PUT',
         body: JSON.stringify({ displayName: displayName.trim(), about: about.trim() }),
       });

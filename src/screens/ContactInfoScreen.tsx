@@ -1,82 +1,59 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { useAuthStore } from '../store/useAuthStore';
+import { useChatStore } from '../store/useChatStore';
+import { useWebRTCStore } from '../store/useWebRTCStore';
+import { chatLocalBytes, clearChatFiles, resolveMediaUrl } from '../lib/offlineFiles';
+import { Message } from '../types';
+
+const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 
 export default function ContactInfoScreen({ route }: any) {
-  const { chatName, avatarUrl } = route.params || {};
+  const { chatId, chatName, avatarUrl } = route.params;
+  const user = useAuthStore((state) => state.user);
+  const chat = useChatStore((state) => state.chats.find((item) => item.id === chatId));
+  const messages = useChatStore((state) => state.messagesByChat[chatId] || []);
+  const { loadMessages, clearLocalMedia } = useChatStore.getState();
+  const startCall = useWebRTCStore((state) => state.startCall);
+  const [localBytes, setLocalBytes] = useState(0);
+  const target = chat?.participants.find((participant) => participant.id !== user?.id);
+  const media = useMemo(() => messages.filter((message) => ['IMAGE', 'VIDEO'].includes(message.type) && !message.viewOnce && !message.deletedForEveryone), [messages]);
+  const documents = useMemo(() => messages.filter((message) => ['DOCUMENT', 'AUDIO'].includes(message.type) && !message.deletedForEveryone), [messages]);
+  const links = useMemo(() => messages.filter((message) => message.type === 'TEXT' && /https?:\/\/\S+/i.test(message.content)), [messages]);
+  const starred = useMemo(() => messages.filter((message) => message.isStarred), [messages]);
+  const knownBytes = messages.reduce((total, message) => total + Number(message.mediaSize || 0), 0);
 
+  useEffect(() => { void loadMessages(chatId); void chatLocalBytes(chatId).then(setLocalBytes); }, [chatId]);
+  const call = (video: boolean) => target && startCall(target.id, target.displayName || target.phoneNumber, video);
+  const open = (message: Message) => {
+    const uri = message.localUri || resolveMediaUrl(message.mediaUrl);
+    if (uri) void Share.share({ url: uri, message: message.mediaName || message.content });
+  };
+  const clear = () => Alert.alert('Liberar copias offline', `Se eliminarán ${formatBytes(localBytes)} guardados en este teléfono. Los mensajes seguirán en el servidor.`, [
+    { text: 'Cancelar', style: 'cancel' },
+    { text: 'Liberar', style: 'destructive', onPress: async () => { await clearChatFiles(chatId); clearLocalMedia(chatId); setLocalBytes(0); } },
+  ]);
+
+  const avatar = resolveMediaUrl(avatarUrl || chat?.avatarUrl);
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.avatarPlaceholder}>
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-          ) : (
-            <Text style={styles.avatarText}>{chatName?.[0] || '?'}</Text>
-          )}
-        </View>
-        <Text style={styles.contactName}>{chatName || 'Contacto'}</Text>
-        <Text style={styles.phoneNumber}>+52 55 1234 5678</Text>
-        
-        <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Text style={styles.actionIcon}>📞</Text>
-            <Text style={styles.actionText}>Llamar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Text style={styles.actionIcon}>🎥</Text>
-            <Text style={styles.actionText}>Video</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Text style={styles.actionIcon}>🔍</Text>
-            <Text style={styles.actionText}>Buscar</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.header}>{avatar ? <Image source={{ uri: avatar }} style={styles.avatar} /> : <View style={styles.fallback}><Text style={styles.initial}>{chatName?.[0] || '?'}</Text></View>}<Text style={styles.name}>{chatName}</Text><Text style={styles.phone}>{target?.phoneNumber || ''}</Text><Text style={styles.presence}>{target?.isOnline ? 'en línea' : target?.lastSeen ? `Última vez ${new Date(target.lastSeen).toLocaleString()}` : ''}</Text>
+        <View style={styles.actions}><Action icon="call" label="Llamar" onPress={() => call(false)} /><Action icon="videocam" label="Video" onPress={() => call(true)} /></View>
       </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Archivos, enlaces y documentos</Text>
-        <Text style={styles.sectionSubtitle}>0 compartidos</Text>
-      </View>
-
-      <View style={styles.section}>
-        <TouchableOpacity style={styles.dangerRow}>
-          <Text style={styles.dangerIcon}>🚫</Text>
-          <Text style={styles.dangerText}>Bloquear {chatName}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.dangerRow}>
-          <Text style={styles.dangerIcon}>👎</Text>
-          <Text style={styles.dangerText}>Reportar contacto</Text>
-        </TouchableOpacity>
-      </View>
+      <Section title="Archivos, enlaces y documentos" subtitle={`${media.length} multimedia · ${documents.length} archivos · ${links.length} enlaces`} />
+      {media.length > 0 && <View style={styles.grid}>{media.slice(-12).map((message) => <TouchableOpacity key={message._id} onPress={() => open(message)}>{message.type === 'IMAGE' ? <Image source={{ uri: message.localUri || resolveMediaUrl(message.mediaUrl)! }} style={styles.thumb} /> : <View style={[styles.thumb, styles.videoThumb]}><Icon name="play-circle" size={32} color="#fff" /></View>}</TouchableOpacity>)}</View>}
+      <View style={styles.section}><Text style={styles.sectionTitle}>Mensajes destacados</Text><Text style={styles.subtitle}>{starred.length} mensajes</Text>{starred.slice(0, 10).map((message) => <Text key={message._id} numberOfLines={2} style={styles.starred}>★ {message.content}</Text>)}</View>
+      <TouchableOpacity style={styles.section} onPress={clear}><Text style={styles.sectionTitle}>Administrar almacenamiento</Text><Text style={styles.subtitle}>{formatBytes(localBytes)} guardados offline · {formatBytes(knownBytes)} de contenido conocido</Text><Text style={styles.link}>Liberar copias offline</Text></TouchableOpacity>
     </ScrollView>
   );
 }
 
+function Action({ icon, label, onPress }: any) { return <TouchableOpacity style={styles.action} onPress={onPress}><Icon name={icon} size={27} color="#0066cc" /><Text style={styles.actionText}>{label}</Text></TouchableOpacity>; }
+function Section({ title, subtitle }: any) { return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text><Text style={styles.subtitle}>{subtitle}</Text></View>; }
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5' },
-  header: { 
-    alignItems: 'center', backgroundColor: '#fff', 
-    padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee',
-  },
-  avatarPlaceholder: {
-    width: 120, height: 120, borderRadius: 60, backgroundColor: '#ccc',
-    justifyContent: 'center', alignItems: 'center', marginBottom: 15,
-  },
-  avatar: { width: 120, height: 120, borderRadius: 60 },
-  avatarText: { color: '#fff', fontSize: 48, fontWeight: 'bold' },
-  contactName: { fontSize: 24, fontWeight: 'bold', color: '#000' },
-  phoneNumber: { fontSize: 16, color: '#666', marginTop: 5 },
-  actionButtons: { flexDirection: 'row', marginTop: 20, justifyContent: 'space-around', width: '100%' },
-  actionBtn: { alignItems: 'center', padding: 10 },
-  actionIcon: { fontSize: 24, marginBottom: 5 },
-  actionText: { color: '#0066cc', fontSize: 14, fontWeight: '600' },
-  section: {
-    backgroundColor: '#fff', marginTop: 15, padding: 15,
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#e0e0e0',
-  },
-  sectionTitle: { fontSize: 16, color: '#000', fontWeight: 'bold' },
-  sectionSubtitle: { fontSize: 14, color: '#666', marginTop: 5 },
-  dangerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  dangerIcon: { fontSize: 20, marginRight: 15 },
-  dangerText: { color: 'red', fontSize: 16, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#f1f2f4' }, header: { alignItems: 'center', padding: 24, backgroundColor: '#fff' }, avatar: { width: 120, height: 120, borderRadius: 60 }, fallback: { width: 120, height: 120, borderRadius: 60, backgroundColor: '#8ba4b8', alignItems: 'center', justifyContent: 'center' }, initial: { color: '#fff', fontSize: 46, fontWeight: '700' }, name: { marginTop: 14, fontSize: 25, fontWeight: '700', color: '#111' }, phone: { marginTop: 4, color: '#555' }, presence: { marginTop: 3, color: '#228b45', fontSize: 13 }, actions: { flexDirection: 'row', gap: 55, marginTop: 20 }, action: { alignItems: 'center' }, actionText: { color: '#0066cc', marginTop: 5, fontWeight: '600' },
+  section: { marginTop: 13, padding: 16, backgroundColor: '#fff' }, sectionTitle: { fontSize: 17, fontWeight: '700', color: '#111' }, subtitle: { color: '#666', marginTop: 4 }, link: { color: '#0066cc', marginTop: 12, fontWeight: '600' },
+  grid: { padding: 8, backgroundColor: '#fff', flexDirection: 'row', flexWrap: 'wrap', gap: 4 }, thumb: { width: 83, height: 83, borderRadius: 4 }, videoThumb: { backgroundColor: '#333', alignItems: 'center', justifyContent: 'center' }, starred: { paddingVertical: 8, color: '#333', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
 });

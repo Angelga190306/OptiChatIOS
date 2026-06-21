@@ -85,7 +85,7 @@ jobs:
         if: steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Restore node_modules cache
         if: steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo'
@@ -99,7 +99,7 @@ jobs:
 
       - name: Install npm dependencies
         if: (steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo') && steps.node-modules-cache.outputs.cache-hit != 'true'
-        run: npm install
+        run: npm ci
 
       - name: Restore Pods cache
         uses: actions/cache@v4

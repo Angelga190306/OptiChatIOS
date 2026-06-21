@@ -2,7 +2,8 @@ import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StatusBar } from 'react-native';
+import { ActivityIndicator, AppState, StatusBar, Text, View } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import LoginScreen from './src/screens/LoginScreen';
@@ -16,8 +17,12 @@ import ContactInfoScreen from './src/screens/ContactInfoScreen';
 
 import { useAuthStore } from './src/store/useAuthStore';
 import { useSocketStore } from './src/store/useSocketStore';
+import { useChatStore } from './src/store/useChatStore';
 import { useWebRTCStore } from './src/store/useWebRTCStore';
 import { ActiveCallView } from './src/components/chat/ActiveCallView';
+import { fetchJson } from './src/lib/api';
+import { cacheOwnAvatar } from './src/lib/offlineFiles';
+import { User } from './src/types';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -63,11 +68,9 @@ function MainTabs() {
   );
 }
 
-import { Text } from 'react-native';
-
 function App() {
-  const { user, accessToken } = useAuthStore();
-  const { connect, disconnect } = useSocketStore();
+  const { user, accessToken, hasHydrated, updateUser } = useAuthStore();
+  const { connect, disconnect, reconnectForNetwork, socket } = useSocketStore();
   
   const {
     callState,
@@ -77,11 +80,13 @@ function App() {
     remoteStream,
     isMuted,
     isVideoOff,
+    videoUpgradePending,
     acceptCall,
     rejectCall,
     endCall,
     toggleMute,
     toggleVideo,
+    requestVideoUpgrade,
     setupSocketListeners,
     removeSocketListeners
   } = useWebRTCStore();
@@ -89,15 +94,56 @@ function App() {
   useEffect(() => {
     if (user && accessToken) {
       connect();
-      setTimeout(() => {
-        setupSocketListeners();
-      }, 500);
     } else {
       removeSocketListeners();
       disconnect();
     }
     return () => removeSocketListeners();
-  }, [user, accessToken]);
+  }, [user?.id, accessToken]);
+
+  useEffect(() => {
+    if (!socket) return;
+    setupSocketListeners();
+    return () => removeSocketListeners();
+  }, [socket]);
+
+  useEffect(() => {
+    const refresh = async () => {
+      if (!useAuthStore.getState().accessToken) return;
+      try {
+        const profile = await fetchJson<User>('/users/me');
+        const localAvatarUri = await cacheOwnAvatar(profile.avatarUrl);
+        updateUser({ ...profile, localAvatarUri: localAvatarUri || user?.localAvatarUri });
+      } catch {
+        // La sesión y la foto local siguen disponibles sin red.
+      }
+    };
+    const unsubscribeNetwork = NetInfo.addEventListener((state) => {
+      const online = Boolean(state.isConnected && state.isInternetReachable !== false);
+      useChatStore.getState().setOnline(online);
+      if (online && useAuthStore.getState().accessToken) {
+        reconnectForNetwork();
+        void useChatStore.getState().flushOutbox();
+        void refresh();
+      }
+    });
+    const appSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && useAuthStore.getState().accessToken) {
+        reconnectForNetwork();
+        void useChatStore.getState().flushOutbox();
+        void refresh();
+      }
+    });
+    void refresh();
+    return () => {
+      unsubscribeNetwork();
+      appSubscription.remove();
+    };
+  }, [user?.id]);
+
+  if (!hasHydrated) {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color="#0066cc" /></View>;
+  }
 
   return (
     <SafeAreaProvider>
@@ -134,11 +180,13 @@ function App() {
           remoteStream={remoteStream}
           isMuted={isMuted}
           isVideoOff={isVideoOff}
+          videoUpgradePending={videoUpgradePending}
           onAccept={acceptCall}
           onReject={rejectCall}
           onEnd={endCall}
           onToggleMute={toggleMute}
           onToggleVideo={toggleVideo}
+          onRequestVideoUpgrade={requestVideoUpgrade}
         />
       )}
     </NavigationContainer>
