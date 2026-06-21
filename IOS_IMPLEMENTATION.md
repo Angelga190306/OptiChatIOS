@@ -28,9 +28,13 @@ El commit `f9ef460` afirmaba paridad completa con Android, pero la aplicación s
 - Jest: 3 pruebas correctas (deduplicación de outbox, ventana de eliminación y client IDs).
 - ESLint: sin errores.
 - Metro bundle iOS Release: correcto.
+- GitHub Actions run `27895172085`: build Release correcto en 4m14s.
+- IPA: `dist/OptiChatIOS-1aa9190c.ipa`, 15,724,898 bytes, SHA-256 `9E2D477BF683AA687EC40233C62643DD7288BD6FE7B5235562482E9A5D69DA64`.
+- El `Info.plist` extraído del IPA confirma `com.optishieldx.optichat`, versión `1.3.0`, build `110` y nombre `OptiChat`.
+- El bundle empacado contiene los marcadores de cambio a video, renegociación, outbox v2, grabación bloqueable y backups.
 
 ## Pendiente de verificación/infraestructura Apple
 
-- Compilar el IPA en GitHub Actions y probarlo en el iPhone real.
+- Instalar y probar el IPA en el iPhone real. MobAI no estaba ejecutándose en `localhost:8686` al terminar el build.
 - Las llamadas/mensajes con la app terminada requieren APNs/FCM para iOS. No existe `GoogleService-Info.plist`, entitlement Push Notifications ni credencial APNs en este proyecto; no se inventarán ni se incluirán secretos falsos.
 - iOS no ofrece una API que garantice bloquear una captura de pantalla estática. Se puede detectar después y avisar al remitente; la protección durante grabación/espejado sí puede ocultar contenido. Esto se tratará en la integración nativa de visualización única.
