@@ -13,6 +13,6 @@ interface State { statuses: Status[]; isLoading: boolean; isUploading: boolean; 
 export const useStatusStore = create<State>()(persist((set, get) => ({
   statuses: [], isLoading: false, isUploading: false, error: null,
   loadStatuses: async () => { set({ isLoading: true, error: null }); try { set({ statuses: await fetchJson<Status[]>('/statuses') }); } catch (error: any) { set({ error: error.message }); } finally { set({ isLoading: false }); } },
-  createStatus: async (file, caption = '') => { set({ isUploading: true, error: null }); try { const form = new FormData(); form.append('file', file as any); form.append('caption', caption); form.append('audienceType', 'ALL_CONTACTS'); await fetchJson('/statuses', { method: 'POST', body: form }); await get().loadStatuses(); } finally { set({ isUploading: false }); } },
+  createStatus: async (file, caption = '') => { set({ isUploading: true, error: null }); try { const form = new FormData(); form.append('caption', caption); form.append('audienceType', 'ALL_CONTACTS'); form.append('file', file as any); await fetchJson('/statuses', { method: 'POST', body: form }); await get().loadStatuses(); } finally { set({ isUploading: false }); } },
   deleteStatus: async (id) => { await fetchJson(`/statuses/${id}`, { method: 'DELETE' }); set((state) => ({ statuses: state.statuses.filter((item) => item._id !== id) })); },
 }), { name: 'optichat-status-cache', storage: createJSONStorage(() => AsyncStorage), partialize: (state) => ({ statuses: state.statuses }) }));

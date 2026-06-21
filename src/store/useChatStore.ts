@@ -43,10 +43,10 @@ async function uploadPending(item: PendingMessage): Promise<Message> {
     });
   }
   const form = new FormData();
-  form.append('file', { uri: item.localUri, name: item.fileName, type: item.mimeType } as any);
   form.append('clientMessageId', item.clientMessageId);
   if (item.durationMs != null) form.append('durationMs', String(item.durationMs));
   if (item.viewOnce) form.append('viewOnce', 'true');
+  form.append('file', { uri: item.localUri, name: item.fileName, type: item.mimeType } as any);
   return fetchJson<Message>(`/chats/${item.conversationId}/media`, { method: 'POST', body: form });
 }
 
@@ -226,7 +226,15 @@ export const useChatStore = create<ChatState>()(
     {
       name: 'optichat-chat-storage-v2',
       storage: createJSONStorage(() => AsyncStorage),
+      version: 2,
       partialize: (state) => ({ chats: state.chats, messagesByChat: state.messagesByChat, outbox: state.outbox }),
+      merge: (persisted: any, current) => ({
+        ...current,
+        ...persisted,
+        chats: Array.isArray(persisted?.chats) ? persisted.chats : [],
+        messagesByChat: persisted?.messagesByChat && typeof persisted.messagesByChat === 'object' ? persisted.messagesByChat : {},
+        outbox: Array.isArray(persisted?.outbox) ? persisted.outbox : [],
+      }),
     },
   ),
 );

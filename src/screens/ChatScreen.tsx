@@ -29,7 +29,7 @@ export default function ChatScreen() {
   const navigation = useNavigation<any>();
   const { chatId, chatName, avatarUrl } = route.params;
   const chats = useChatStore((state) => state.chats);
-  const messages = useChatStore((state) => state.messagesByChat[chatId] || []);
+  const messages = useChatStore((state) => state.messagesByChat?.[chatId] || []);
   const isLoading = useChatStore((state) => state.isLoadingMessages);
   const { loadMessages, sendMessage, sendMedia, toggleStarred, deleteMessage, forwardMessage } = useChatStore.getState();
   const user = useAuthStore((state) => state.user);
@@ -42,7 +42,7 @@ export default function ChatScreen() {
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chat = chats.find((item) => item.id === chatId);
-  const target = chat?.participants.find((participant) => participant.id !== user?.id);
+  const target = Array.isArray(chat?.participants) ? chat?.participants.find((participant) => participant?.id !== user?.id) : undefined;
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -178,7 +178,7 @@ export default function ChatScreen() {
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={88}>
       {isLoading && messages.length === 0 ? <ActivityIndicator style={{ flex: 1 }} size="large" color="#0066cc" /> : (
-        <FlatList data={messages} keyExtractor={(item) => idOf(item)} renderItem={renderMessage} contentContainerStyle={styles.list} />
+        <FlatList data={Array.isArray(messages) ? messages : []} keyExtractor={(item, index) => String(idOf(item) || `message-${index}`)} renderItem={renderMessage} contentContainerStyle={styles.list} />
       )}
       <View style={styles.inputBar}>
         {!isRecording && <>

@@ -1,8 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { Component, ReactNode, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, AppState, StatusBar, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  StatusBar,
+  Text,
+  View,
+} from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -35,6 +41,42 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View
+          style={{
+            flex: 1,
+            padding: 28,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#fff',
+          }}
+        >
+          <Text style={{ fontSize: 24, fontWeight: '800', color: '#b3261e' }}>
+            OptiChat encontró un error
+          </Text>
+          <Text style={{ marginTop: 12, color: '#555', textAlign: 'center' }}>
+            {this.state.error.message}
+          </Text>
+          <Text style={{ marginTop: 12, color: '#777', textAlign: 'center' }}>
+            La aplicación seguirá abierta para poder identificarlo.
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -44,24 +86,24 @@ function MainTabs() {
         tabBarInactiveTintColor: '#666',
       }}
     >
-      <Tab.Screen 
-        name="Chats" 
-        component={ChatsTab} 
+      <Tab.Screen
+        name="Chats"
+        component={ChatsTab}
         options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>💬</Text> }}
       />
-      <Tab.Screen 
-        name="Novedades" 
-        component={StatusTab} 
+      <Tab.Screen
+        name="Novedades"
+        component={StatusTab}
         options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>🔄</Text> }}
       />
-      <Tab.Screen 
-        name="Llamadas" 
-        component={CallsTab} 
+      <Tab.Screen
+        name="Llamadas"
+        component={CallsTab}
         options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>📞</Text> }}
       />
-      <Tab.Screen 
-        name="Configuración" 
-        component={SettingsTab} 
+      <Tab.Screen
+        name="Configuración"
+        component={SettingsTab}
         options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>⚙️</Text> }}
       />
     </Tab.Navigator>
@@ -71,7 +113,7 @@ function MainTabs() {
 function App() {
   const { user, accessToken, hasHydrated, updateUser } = useAuthStore();
   const { connect, disconnect, reconnectForNetwork, socket } = useSocketStore();
-  
+
   const {
     callState,
     callerName,
@@ -88,7 +130,7 @@ function App() {
     toggleVideo,
     requestVideoUpgrade,
     setupSocketListeners,
-    removeSocketListeners
+    removeSocketListeners,
   } = useWebRTCStore();
 
   useEffect(() => {
@@ -113,13 +155,18 @@ function App() {
       try {
         const profile = await fetchJson<User>('/users/me');
         const localAvatarUri = await cacheOwnAvatar(profile.avatarUrl);
-        updateUser({ ...profile, localAvatarUri: localAvatarUri || user?.localAvatarUri });
+        updateUser({
+          ...profile,
+          localAvatarUri: localAvatarUri || user?.localAvatarUri,
+        });
       } catch {
         // La sesión y la foto local siguen disponibles sin red.
       }
     };
-    const unsubscribeNetwork = NetInfo.addEventListener((state) => {
-      const online = Boolean(state.isConnected && state.isInternetReachable !== false);
+    const unsubscribeNetwork = NetInfo.addEventListener(state => {
+      const online = Boolean(
+        state.isConnected && state.isInternetReachable !== false,
+      );
       useChatStore.getState().setOnline(online);
       if (online && useAuthStore.getState().accessToken) {
         reconnectForNetwork();
@@ -127,7 +174,7 @@ function App() {
         void refresh();
       }
     });
-    const appSubscription = AppState.addEventListener('change', (state) => {
+    const appSubscription = AppState.addEventListener('change', state => {
       if (state === 'active' && useAuthStore.getState().accessToken) {
         reconnectForNetwork();
         void useChatStore.getState().flushOutbox();
@@ -142,55 +189,78 @@ function App() {
   }, [user?.id]);
 
   if (!hasHydrated) {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color="#0066cc" /></View>;
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#0066cc" />
+      </View>
+    );
   }
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <StatusBar barStyle="dark-content" />
-        <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: '#0066cc' }, headerTintColor: '#fff' }}>
-        {!user ? (
-          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-        ) : !user.displayName ? (
-          <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} options={{ headerShown: false }} />
-        ) : (
-          <>
-            <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="Chat" 
-              component={ChatScreen} 
-              options={({ route }) => ({ title: route.params.chatName })} 
+    <AppErrorBoundary>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <StatusBar barStyle="dark-content" />
+          <Stack.Navigator
+            screenOptions={{
+              headerStyle: { backgroundColor: '#0066cc' },
+              headerTintColor: '#fff',
+            }}
+          >
+            {!user ? (
+              <Stack.Screen
+                name="Login"
+                component={LoginScreen}
+                options={{ headerShown: false }}
+              />
+            ) : !user.displayName ? (
+              <Stack.Screen
+                name="ProfileSetup"
+                component={ProfileSetupScreen}
+                options={{ headerShown: false }}
+              />
+            ) : (
+              <>
+                <Stack.Screen
+                  name="MainTabs"
+                  component={MainTabs}
+                  options={{ headerShown: false }}
+                />
+                <Stack.Screen
+                  name="Chat"
+                  component={ChatScreen}
+                  options={({ route }) => ({ title: route.params.chatName })}
+                />
+                <Stack.Screen
+                  name="ContactInfo"
+                  component={ContactInfoScreen}
+                  options={{ title: 'Info. del contacto' }}
+                />
+              </>
+            )}
+          </Stack.Navigator>
+
+          {user && callState !== 'idle' && (
+            <ActiveCallView
+              callState={callState}
+              callerName={callerName}
+              isVideoCall={isVideoCall}
+              localStream={localStream}
+              remoteStream={remoteStream}
+              isMuted={isMuted}
+              isVideoOff={isVideoOff}
+              videoUpgradePending={videoUpgradePending}
+              onAccept={acceptCall}
+              onReject={rejectCall}
+              onEnd={endCall}
+              onToggleMute={toggleMute}
+              onToggleVideo={toggleVideo}
+              onRequestVideoUpgrade={requestVideoUpgrade}
             />
-            <Stack.Screen 
-              name="ContactInfo" 
-              component={ContactInfoScreen} 
-              options={{ title: 'Info. del contacto' }} 
-            />
-          </>
-        )}
-      </Stack.Navigator>
-      
-      {user && callState !== 'idle' && (
-        <ActiveCallView
-          callState={callState}
-          callerName={callerName}
-          isVideoCall={isVideoCall}
-          localStream={localStream}
-          remoteStream={remoteStream}
-          isMuted={isMuted}
-          isVideoOff={isVideoOff}
-          videoUpgradePending={videoUpgradePending}
-          onAccept={acceptCall}
-          onReject={rejectCall}
-          onEnd={endCall}
-          onToggleMute={toggleMute}
-          onToggleVideo={toggleVideo}
-          onRequestVideoUpgrade={requestVideoUpgrade}
-        />
-      )}
-    </NavigationContainer>
-    </SafeAreaProvider>
+          )}
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }
 

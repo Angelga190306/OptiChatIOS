@@ -13,11 +13,11 @@ export default function ContactInfoScreen({ route }: any) {
   const { chatId, chatName, avatarUrl } = route.params;
   const user = useAuthStore((state) => state.user);
   const chat = useChatStore((state) => state.chats.find((item) => item.id === chatId));
-  const messages = useChatStore((state) => state.messagesByChat[chatId] || []);
+  const messages = useChatStore((state) => state.messagesByChat?.[chatId] || []);
   const { loadMessages, clearLocalMedia } = useChatStore.getState();
   const startCall = useWebRTCStore((state) => state.startCall);
   const [localBytes, setLocalBytes] = useState(0);
-  const target = chat?.participants.find((participant) => participant.id !== user?.id);
+  const target = Array.isArray(chat?.participants) ? chat?.participants.find((participant) => participant?.id !== user?.id) : undefined;
   const media = useMemo(() => messages.filter((message) => ['IMAGE', 'VIDEO'].includes(message.type) && !message.viewOnce && !message.deletedForEveryone), [messages]);
   const documents = useMemo(() => messages.filter((message) => ['DOCUMENT', 'AUDIO'].includes(message.type) && !message.deletedForEveryone), [messages]);
   const links = useMemo(() => messages.filter((message) => message.type === 'TEXT' && /https?:\/\/\S+/i.test(message.content)), [messages]);
