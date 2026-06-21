@@ -6,7 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'MainTabs'>;
 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -71,7 +71,7 @@ export default function ChatsTab() {
           }
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
