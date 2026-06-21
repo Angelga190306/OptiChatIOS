@@ -38,3 +38,16 @@ El commit `f9ef460` afirmaba paridad completa con Android, pero la aplicación s
 - Instalar y probar el IPA en el iPhone real. MobAI no estaba ejecutándose en `localhost:8686` al terminar el build.
 - Las llamadas/mensajes con la app terminada requieren APNs/FCM para iOS. No existe `GoogleService-Info.plist`, entitlement Push Notifications ni credencial APNs en este proyecto; no se inventarán ni se incluirán secretos falsos.
 - iOS no ofrece una API que garantice bloquear una captura de pantalla estática. Se puede detectar después y avisar al remitente; la protección durante grabación/espejado sí puede ocultar contenido. Esto se tratará en la integración nativa de visualización única.
+
+## Hotfix 1.3.1 (111) — 2026-06-21
+
+La primera prueba física reveló cierres al abrir Chat/Info, controles de cierre fuera del área cómoda, Estados sin editor, menú crudo del avatar y errores de backup sin detalle. El commit `e1c798a` agrega recuperación defensiva de caché, validación de datos antes de renderizar, límite global de errores, modales dentro del área segura, editor/publicación de Estados, menú visual de acciones y detalle/reintento de backups. También corrige el orden multipart para que Fastify reciba los campos antes del archivo.
+
+Verificación:
+- TypeScript, 3/3 Jest, ESLint sin errores, Metro Release y `git diff --check`: correctos.
+- GitHub Actions run `27909402185`: correcto.
+- IPA: `dist/OptiChatIOS-1.3.1-build111.ipa`, 15,729,079 bytes.
+- SHA-256: `9235BBD9C629F1A8F11D5C09B4C8A89E2E268A62391CA8B18DDC0865759C0DE9`.
+- Contenedor IPA íntegro; metadata confirmada: `com.optishieldx.optichat`, `1.3.1 (111)`, `OptiChat`.
+
+Queda pendiente repetir en el iPhone los cinco flujos reportados. Si Chat o Info vuelven a fallar por JavaScript, la aplicación permanecerá abierta y mostrará el error concreto para la siguiente corrección.
