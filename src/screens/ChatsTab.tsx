@@ -8,9 +8,10 @@ import { RootStackParamList } from '../../App';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 export default function ChatsTab() {
   const { chats, loadChats, isLoadingChats, setActiveChat } = useChatStore();
-  const { user, logout } = useAuthStore();
   const navigation = useNavigation<NavigationProp>();
 
   useEffect(() => {
@@ -50,12 +51,9 @@ export default function ChatsTab() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
-        <TouchableOpacity onPress={logout}>
-          <Text style={styles.logoutText}>Salir</Text>
-        </TouchableOpacity>
       </View>
       
       {isLoadingChats && chats.length === 0 ? (

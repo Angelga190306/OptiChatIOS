@@ -1,65 +1,68 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../store/useAuthStore';
 
 export default function SettingsTab() {
   const { user, logout } = useAuthStore();
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Configuración</Text>
-      </View>
-
-      <TouchableOpacity style={styles.profileSection}>
-        <View style={styles.avatarPlaceholder}>
-          {user?.avatarUrl ? (
-            <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
-          ) : (
-            <Text style={styles.avatarText}>{user?.displayName?.[0] || '?'}</Text>
-          )}
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Configuración</Text>
         </View>
-        <View style={styles.profileInfo}>
-          <Text style={styles.profileName}>{user?.displayName || 'Usuario'}</Text>
-          <Text style={styles.profileAbout}>{user?.about || 'Disponible'}</Text>
+
+        <TouchableOpacity style={styles.profileSection}>
+          <View style={styles.avatarPlaceholder}>
+            {user?.avatarUrl ? (
+              <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
+            ) : (
+              <Text style={styles.avatarText}>{user?.displayName?.[0] || '?'}</Text>
+            )}
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{user?.displayName || 'Usuario'}</Text>
+            <Text style={styles.profileAbout}>{user?.about || 'Disponible'}</Text>
+          </View>
+          <Text style={styles.qrIcon}>📱</Text>
+        </TouchableOpacity>
+
+        <View style={styles.settingsGroup}>
+          <TouchableOpacity style={styles.settingsItem}>
+            <Text style={styles.settingsIcon}>💻</Text>
+            <View style={styles.settingsItemTextContainer}>
+              <Text style={styles.settingsItemTitle}>Dispositivos Vinculados</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingsItem}>
+            <Text style={styles.settingsIcon}>🔑</Text>
+            <View style={styles.settingsItemTextContainer}>
+              <Text style={styles.settingsItemTitle}>Cuenta</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingsItem}>
+            <Text style={styles.settingsIcon}>💬</Text>
+            <View style={styles.settingsItemTextContainer}>
+              <Text style={styles.settingsItemTitle}>Chats</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingsItem}>
+            <Text style={styles.settingsIcon}>🔔</Text>
+            <View style={styles.settingsItemTextContainer}>
+              <Text style={styles.settingsItemTitle}>Notificaciones</Text>
+            </View>
+          </TouchableOpacity>
         </View>
-        <Text style={styles.qrIcon}>📱</Text>
-      </TouchableOpacity>
 
-      <View style={styles.settingsGroup}>
-        <TouchableOpacity style={styles.settingsItem}>
-          <Text style={styles.settingsIcon}>💻</Text>
-          <View style={styles.settingsItemTextContainer}>
-            <Text style={styles.settingsItemTitle}>Dispositivos Vinculados</Text>
-          </View>
+        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+          <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.settingsItem}>
-          <Text style={styles.settingsIcon}>🔑</Text>
-          <View style={styles.settingsItemTextContainer}>
-            <Text style={styles.settingsItemTitle}>Cuenta</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.settingsItem}>
-          <Text style={styles.settingsIcon}>💬</Text>
-          <View style={styles.settingsItemTextContainer}>
-            <Text style={styles.settingsItemTitle}>Chats</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.settingsItem}>
-          <Text style={styles.settingsIcon}>🔔</Text>
-          <View style={styles.settingsItemTextContainer}>
-            <Text style={styles.settingsItemTitle}>Notificaciones</Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity style={styles.logoutButton} onPress={logout}>
-        <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
-      </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

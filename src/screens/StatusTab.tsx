@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { fetchApi } from '../lib/api';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -28,7 +29,7 @@ export default function StatusTab() {
   }, []);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Estados</Text>
       </View>
@@ -74,7 +75,7 @@ export default function StatusTab() {
           }
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

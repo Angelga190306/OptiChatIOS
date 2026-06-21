@@ -1,45 +1,74 @@
-import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { fetchApi } from '../lib/api';
+import { useAuthStore } from '../store/useAuthStore';
 
 export default function CallsTab() {
-  const mockCalls = [
-    { id: '1', name: 'Mamá', type: 'incoming', time: 'Ayer, 20:30', missed: false },
-    { id: '2', name: 'Juan', type: 'outgoing', time: 'Ayer, 18:15', missed: false },
-    { id: '3', name: 'Trabajo', type: 'incoming', time: 'Lunes, 09:00', missed: true },
-  ];
+  const [calls, setCalls] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuthStore();
+
+  const loadCalls = async () => {
+    try {
+      setLoading(true);
+      const res = await fetchApi('/calls/history');
+      if (res.ok) {
+        const data = await res.json();
+        setCalls(data || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCalls();
+  }, []);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Llamadas</Text>
       </View>
-      <FlatList
-        data={mockCalls}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.callItem}>
-            <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarText}>{item.name[0]}</Text>
-            </View>
-            <View style={styles.callInfo}>
-              <Text style={[styles.callName, item.missed && { color: 'red' }]}>{item.name}</Text>
-              <View style={styles.callDetailsRow}>
-                <Text style={styles.callDetails}>
-                  {item.type === 'incoming' ? '↙ ' : '↗ '}
-                  {item.time}
-                </Text>
+      
+      {loading ? (
+        <ActivityIndicator style={{ marginTop: 20 }} color="#0066cc" />
+      ) : (
+        <FlatList
+          data={calls}
+          keyExtractor={(item) => item.id || Math.random().toString()}
+          refreshing={loading}
+          onRefresh={loadCalls}
+          renderItem={({ item }) => (
+            <View style={styles.callItem}>
+              <View style={styles.avatarPlaceholder}>
+                <Text style={styles.avatarText}>{item.callerName?.[0] || '?'}</Text>
               </View>
+              <View style={styles.callInfo}>
+                <Text style={[styles.callName, item.missed && { color: 'red' }]}>
+                  {item.callerName || 'Desconocido'}
+                </Text>
+                <View style={styles.callDetailsRow}>
+                  <Text style={styles.callDetails}>
+                    {item.type === 'incoming' ? '↙ ' : '↗ '}
+                    {new Date(item.timestamp).toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity style={styles.callButton}>
+                <Text style={{ fontSize: 24 }}>📞</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.callButton}>
-              <Text style={{ fontSize: 24 }}>📞</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No tienes llamadas recientes.</Text>
-        }
-      />
-    </View>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>No tienes llamadas recientes.</Text>
+          }
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
@@ -58,5 +87,5 @@ const styles = StyleSheet.create({
   callDetailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
   callDetails: { fontSize: 13, color: '#666' },
   callButton: { padding: 10 },
-  emptyText: { textAlign: 'center', marginTop: 20, color: '#999' },
+  emptyText: { textAlign: 'center', marginTop: 40, color: '#999', fontSize: 16 },
 });
