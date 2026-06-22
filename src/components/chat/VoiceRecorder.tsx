@@ -4,9 +4,22 @@ import AudioRecorderPlayer, { AudioEncoderAndroidType, AudioSourceAndroidType, A
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
 interface Props { onSend: (fileUri: string, durationMs: number) => void; onCancel?: () => void; onRecordingChange?: (recording: boolean) => void; }
-const recorder = new (AudioRecorderPlayer as any)();
 
 export function VoiceRecorder({ onSend, onCancel, onRecordingChange }: Props) {
+  // La instancia del grabador se crea DENTRO del componente (no a nivel de módulo)
+  // porque la librería nativa react-native-audio-recorder-player abre AVAudioSession
+  // en su constructor. Si se crea al importar VoiceRecorder (cuando el usuario entra
+  // a un chat), iOS puede crashear con "AVAudioSession required to be configured"
+  // si la sesión de audio no está lista. Lo diferimos al primer render del componente
+  // y protegemos con try/catch por si el módulo nativo aún no está inicializado.
+  const recorderRef = useRef<any>(null);
+  const getRecorder = () => {
+    if (!recorderRef.current) {
+      recorderRef.current = new (AudioRecorderPlayer as any)();
+    }
+    return recorderRef.current;
+  };
+
   const [recording, setRecording] = useState(false);
   const [locked, setLocked] = useState(false);
   const [recordTime, setRecordTime] = useState('00:00');
@@ -20,6 +33,7 @@ export function VoiceRecorder({ onSend, onCancel, onRecordingChange }: Props) {
     if (recordingRef.current) return;
     try {
       duration.current = 0; updateLocked(false); updateRecording(true);
+      const recorder = getRecorder();
       await recorder.startRecorder(`voice-${Date.now()}.m4a`, {
         AudioEncoderAndroid: AudioEncoderAndroidType.AAC, AudioSourceAndroid: AudioSourceAndroidType.MIC,
         AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high, AVNumberOfChannelsKeyIOS: 1, AVFormatIDKeyIOS: 'aac',
@@ -29,10 +43,10 @@ export function VoiceRecorder({ onSend, onCancel, onRecordingChange }: Props) {
   };
   const finish = async (send: boolean) => {
     if (!recordingRef.current) return;
-    try { const uri = await recorder.stopRecorder(); recorder.removeRecordBackListener(); const ms = duration.current; updateRecording(false); updateLocked(false); setRecordTime('00:00'); if (send && ms > 300) onSend(uri, ms); else onCancel?.(); }
+    try { const recorder = getRecorder(); const uri = await recorder.stopRecorder(); recorder.removeRecordBackListener(); const ms = duration.current; updateRecording(false); updateLocked(false); setRecordTime('00:00'); if (send && ms > 300) onSend(uri, ms); else onCancel?.(); }
     catch { updateRecording(false); updateLocked(false); onCancel?.(); }
   };
-  useEffect(() => () => { if (recordingRef.current) void recorder.stopRecorder(); recorder.removeRecordBackListener(); }, []);
+  useEffect(() => () => { try { if (recordingRef.current && recorderRef.current) { void recorderRef.current.stopRecorder(); recorderRef.current.removeRecordBackListener(); } } catch { /* ignore */ } }, []);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
