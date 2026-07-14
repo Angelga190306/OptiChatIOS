@@ -34,6 +34,7 @@ export default function SettingsTab() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [name, setName] = useState(user?.displayName || '');
   const [about, setAbout] = useState(user?.about || 'Disponible');
   const [busy, setBusy] = useState(false);
@@ -212,6 +213,12 @@ export default function SettingsTab() {
               setBackupOpen(true);
               void loadBackup().catch(() => undefined);
             }}
+          />
+          <Row
+            icon="lock"
+            title="Privacidad"
+            subtitle="Bloqueados, mensajes temporales"
+            onPress={() => setPrivacyOpen(true)}
           />
           <Row
             icon="notifications"
@@ -400,6 +407,32 @@ export default function SettingsTab() {
               <Text style={styles.empty}>No hay otros dispositivos.</Text>
             }
           />
+        </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={privacyOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setPrivacyOpen(false)}
+      >
+        <SafeAreaView style={styles.modal} edges={['top', 'bottom']}>
+          <ModalHeader title="Privacidad" close={() => setPrivacyOpen(false)} />
+          
+          <View style={styles.card}>
+            <Row
+              icon="block"
+              title="Contactos bloqueados"
+              subtitle="0 contactos"
+              onPress={() => Alert.alert('Bloqueados', 'Gestión de bloqueados disponible próximamente.')}
+            />
+            <Row
+              icon="timer"
+              title="Mensajes temporales"
+              subtitle="Desactivados"
+              onPress={() => Alert.alert('Mensajes Temporales', 'Configuración de mensajes temporales en desarrollo.')}
+            />
+          </View>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>

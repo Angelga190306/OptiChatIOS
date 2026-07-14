@@ -33,6 +33,7 @@ interface ChatState {
   setPresence: (userId: string, isOnline: boolean, lastSeen?: string | null) => void;
   setTyping: (conversationId: string, isTyping: boolean) => void;
   clearLocalMedia: (conversationId: string) => void;
+  updateBlockStatus: (userId: string, blockedByMe: boolean) => void;
 }
 
 async function uploadPending(item: PendingMessage): Promise<Message> {
@@ -222,6 +223,9 @@ export const useChatStore = create<ChatState>()(
         ...state.messagesByChat,
         [conversationId]: (state.messagesByChat[conversationId] || []).map((message) => ({ ...message, localUri: null })),
       } })),
+      updateBlockStatus: (userId, blockedByMe) => set((state) => ({ chats: state.chats.map((chat) => ({
+        ...chat, participants: chat.participants.map((participant) => participant.id === userId ? { ...participant, blockedByMe } : participant),
+      })) })),
     }),
     {
       name: 'optichat-chat-storage-v2',

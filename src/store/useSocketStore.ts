@@ -34,6 +34,8 @@ const bindChatEvents = (socket: Socket) => {
     useChatStore.getState().setPresence(userId, Boolean(isOnline), lastSeen));
   socket.on('typing_changed', ({ conversationId, isTyping }: any) =>
     useChatStore.getState().setTyping(conversationId, Boolean(isTyping)));
+  socket.on('block_status_changed', ({ targetUserId, blockedByMe }: any) =>
+    useChatStore.getState().updateBlockStatus(targetUserId, Boolean(blockedByMe)));
 };
 
 export const useSocketStore = create<SocketState>((set, get) => ({
@@ -88,4 +90,14 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     socket?.disconnect();
     set({ socket: null, activeToken: null, connected: false });
   },
+
+  reportScreenshot: (conversationId: string, messageId?: string) => {
+    const socket = get().socket;
+    if (socket && socket.connected) {
+      socket.emit('screenshot_taken', { conversationId, messageId });
+    } else {
+      console.warn('Socket not connected, cannot report screenshot');
+    }
+  },
+
 }));

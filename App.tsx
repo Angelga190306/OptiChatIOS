@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { PushNotificationService } from './src/lib/pushNotifications';
 
 import LoginScreen from './src/screens/LoginScreen';
 import ProfileSetupScreen from './src/screens/ProfileSetupScreen';
@@ -136,6 +137,15 @@ function App() {
   useEffect(() => {
     if (user && accessToken) {
       connect();
+
+      // Initialize Push Notifications and register token
+      const setupPush = async () => {
+        const token = await PushNotificationService.init();
+        if (token) {
+          await PushNotificationService.updateTokenOnBackend(token, accessToken);
+        }
+      };
+      setupPush();
     } else {
       removeSocketListeners();
       disconnect();

@@ -11,6 +11,7 @@ export interface User {
   isOnline?: boolean;
   lastSeen?: string | null;
   backupFrequency?: 'Diaria' | 'Semanal' | 'Mensual' | 'Ninguna';
+  blockedByMe?: boolean;
 }
 
 export interface Participant extends User { role: string; }

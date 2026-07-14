@@ -13,8 +13,9 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { RootStackParamList } from '../../App';
 import { VoiceRecorder } from '../components/chat/VoiceRecorder';
-import { getApiUrl } from '../lib/api';
+import { getApiUrl, fetchJson } from '../lib/api';
 import { resolveMediaUrl } from '../lib/offlineFiles';
+import { subscribeToScreenshots } from '../lib/screenshotDetector';
 import { useAuthStore } from '../store/useAuthStore';
 import { useChatStore } from '../store/useChatStore';
 import { useSocketStore } from '../store/useSocketStore';
@@ -39,14 +40,92 @@ export default function ChatScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [viewer, setViewer] = useState<{ message: Message; uri: string; once: boolean } | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chat = chats.find((item) => item.id === chatId);
   const target = Array.isArray(chat?.participants) ? chat?.participants.find((participant) => participant?.id !== user?.id) : undefined;
 
+  const openChatMenu = () => {
+    const isBlocked = target?.blockedByMe;
+    ActionSheetIOS.showActionSheetWithOptions({
+      options: ['Cancelar', 'Buscar', 'Archivos', 'Reportar', isBlocked ? 'Desbloquear contacto' : 'Bloquear contacto'],
+      cancelButtonIndex: 0,
+      destructiveButtonIndex: 4,
+    }, async (index) => {
+      if (index === 1) {
+        Alert.alert('Buscar', 'Función de búsqueda en desarrollo.');
+      } else if (index === 2) {
+        navigation.navigate('ContactInfo', { chatId, chatName, avatarUrl: avatarUrl || chat?.avatarUrl });
+      } else if (index === 3) {
+        Alert.alert('Reportar', '¿Estás seguro que deseas reportar a este usuario?', [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Reportar', style: 'destructive', onPress: () => Alert.alert('Reportado', 'El usuario ha sido reportado.') }
+        ]);
+      } else if (index === 4) {
+        if (!target) return;
+        try {
+          if (isBlocked) {
+            await fetchJson(`/users/${target.id}/block`, { method: 'DELETE' });
+            useChatStore.getState().updateBlockStatus(target.id, false);
+          } else {
+            await fetchJson(`/users/${target.id}/block`, { method: 'POST' });
+            useChatStore.getState().updateBlockStatus(target.id, true);
+          }
+        } catch (e: any) {
+          Alert.alert('Error', e.message);
+        }
+      }
+    });
+  };
+
+  const handleBulkDelete = () => {
+    const selectedMessages = messages.filter(m => selectedIds.has(idOf(m)));
+    if (selectedMessages.length === 0) return;
+    
+    const allMine = selectedMessages.every(m => m.senderId === user?.id);
+    const allWithinHour = selectedMessages.every(m => Date.now() - new Date(m.createdAt).getTime() <= 3600000);
+    const canDeleteForEveryone = allMine && allWithinHour;
+
+    const options = ['Cancelar', 'Eliminar para mí'];
+    if (canDeleteForEveryone) options.push('Eliminar para todos');
+
+    ActionSheetIOS.showActionSheetWithOptions({
+      options, cancelButtonIndex: 0, destructiveButtonIndex: canDeleteForEveryone ? [1, 2] : 1,
+    }, async (index) => {
+      if (index === 0) return;
+      const scope = index === 2 ? 'everyone' : 'me';
+      try {
+        await Promise.all(selectedMessages.map(m => deleteMessage(m, scope)));
+        setSelectedIds(new Set());
+      } catch (e: any) {
+        Alert.alert('Error', 'Algunos mensajes no se pudieron eliminar: ' + e.message);
+      }
+    });
+  };
+
   useLayoutEffect(() => {
+    if (selectedIds.size > 0) {
+      navigation.setOptions({
+        title: `${selectedIds.size} seleccionados`,
+        headerTitle: undefined,
+        headerLeft: () => (
+          <TouchableOpacity onPress={() => setSelectedIds(new Set())} style={{ marginLeft: 16 }}>
+            <Icon name="close" size={25} color="#fff" />
+          </TouchableOpacity>
+        ),
+        headerRight: () => (
+          <View style={{ flexDirection: 'row', gap: 18 }}>
+            <TouchableOpacity onPress={handleBulkDelete}><Icon name="delete" size={25} color="#fff" /></TouchableOpacity>
+          </View>
+        ),
+      });
+      return;
+    }
+
     navigation.setOptions({
       title: chatName,
+      headerLeft: undefined,
       headerTitle: () => (
         <TouchableOpacity onPress={() => navigation.navigate('ContactInfo', { chatId, chatName, avatarUrl: avatarUrl || chat?.avatarUrl })}>
           <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700' }}>{chatName}</Text>
@@ -59,10 +138,11 @@ export default function ChatScreen() {
         <View style={{ flexDirection: 'row', gap: 18 }}>
           <TouchableOpacity onPress={() => target && startCall(target.id, target.displayName || target.phoneNumber, false)}><Icon name="call" size={24} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={() => target && startCall(target.id, target.displayName || target.phoneNumber, true)}><Icon name="videocam" size={25} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={openChatMenu}><Icon name="more-vert" size={25} color="#fff" /></TouchableOpacity>
         </View>
       ),
     });
-  }, [navigation, chat, target, chatName, avatarUrl]);
+  }, [navigation, chat, target, chatName, avatarUrl, selectedIds]);
 
   useEffect(() => {
     void loadMessages(chatId);
@@ -71,6 +151,16 @@ export default function ChatScreen() {
       useSocketStore.getState().socket?.emit('typing_stop', { conversationId: chatId });
     };
   }, [chatId]);
+
+  useEffect(() => {
+    if (viewer && viewer.once) {
+      const unsubscribe = subscribeToScreenshots(() => {
+        useSocketStore.getState().reportScreenshot(chatId, viewer.message._id || viewer.message.id);
+        Alert.alert('Aviso', 'Se ha notificado al remitente que has tomado una captura de pantalla.');
+      });
+      return () => unsubscribe();
+    }
+  }, [viewer]);
 
   const onTextChange = (value: string) => {
     setText(value);
@@ -140,54 +230,103 @@ export default function ChatScreen() {
     Alert.alert('Guardado', 'El archivo se guardó en Fotos.');
   };
 
+  const toggleSelection = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
+
   const showMessageActions = (message: Message) => {
-    if (message.status === 'pending' || message.viewOnce) return;
+    if (message.status === 'pending' || message.viewOnce || message.deletedForEveryone) return;
+    
+    // Si ya estamos seleccionando, un long-press simplemente alterna la selección
+    if (selectedIds.size > 0) {
+      toggleSelection(idOf(message));
+      return;
+    }
+
     const own = message.senderId === user?.id;
     const withinHour = Date.now() - new Date(message.createdAt).getTime() <= 3600000;
-    const labels = ['Cancelar'];
-    const actions: Array<() => void> = [() => undefined];
-    if (message.type === 'TEXT' && !message.deletedForEveryone) { labels.push('Copiar'); actions.push(() => Clipboard.setString(message.content)); }
+    const labels = ['Cancelar', 'Seleccionar múltiples'];
+    const actions: Array<() => void> = [() => undefined, () => toggleSelection(idOf(message))];
+    
+    if (message.type === 'TEXT') { labels.push('Copiar'); actions.push(() => Clipboard.setString(message.content)); }
     labels.push(message.isStarred ? 'Quitar destacado' : 'Destacar'); actions.push(() => void toggleStarred(message));
     labels.push('Reenviar'); actions.push(() => setForwarding(message));
     labels.push('Eliminar para mí'); actions.push(() => void deleteMessage(message, 'me').catch((e) => Alert.alert('Error', e.message)));
-    if (own && withinHour && !message.deletedForEveryone) { labels.push('Eliminar para todos'); actions.push(() => void deleteMessage(message, 'everyone').catch((e) => Alert.alert('Error', e.message))); }
+    if (own && withinHour) { labels.push('Eliminar para todos'); actions.push(() => void deleteMessage(message, 'everyone').catch((e) => Alert.alert('Error', e.message))); }
+    
     ActionSheetIOS.showActionSheetWithOptions({ options: labels, cancelButtonIndex: 0, destructiveButtonIndex: labels.map((x, i) => x.startsWith('Eliminar') ? i : -1).filter((i) => i >= 0) }, (index) => actions[index]?.());
   };
 
   const statusIcon = (message: Message) => message.status === 'read' ? '✓✓' : message.status === 'delivered' ? '✓✓' : message.status === 'pending' ? '◷' : message.status === 'failed' ? '!' : '✓';
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const mine = item.senderId === user?.id;
-    const mediaUri = item.localUri || resolveMediaUrl(item.mediaUrl);
+  const renderItem = ({ item }: { item: any }) => {
+    if (item.type === 'DATE_SEPARATOR') {
+      return (
+        <View style={styles.dateSeparatorContainer}>
+          <Text style={styles.dateSeparatorText}>{item.date}</Text>
+        </View>
+      );
+    }
+    const message = item as Message;
+    const mine = message.senderId === user?.id;
+    const mediaUri = message.localUri || resolveMediaUrl(message.mediaUrl);
+    const isSelected = selectedIds.has(idOf(message));
+    
     return (
-      <TouchableOpacity activeOpacity={0.8} onLongPress={() => showMessageActions(item)} onPress={() => item.type !== 'TEXT' && openMessage(item)} style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
-        {item.deletedForEveryone ? <Text style={styles.deleted}>🚫 Este mensaje fue eliminado</Text> : item.viewOnce ? (
-          <View style={styles.onceRow}><Icon name={item.type === 'VIDEO' ? 'videocam' : 'image'} size={23} color="#0066cc" /><Text style={styles.onceText}>{item.viewOnceOpened ? 'Contenido abierto' : 'Ver una vez'}</Text></View>
-        ) : item.type === 'IMAGE' && mediaUri ? <Image source={{ uri: mediaUri }} style={styles.image} />
-          : item.type === 'VIDEO' && mediaUri ? <Video source={{ uri: mediaUri }} paused controls style={styles.video} />
-          : item.type === 'AUDIO' && mediaUri ? <Video source={{ uri: mediaUri }} paused controls style={styles.audio} />
-          : item.type === 'DOCUMENT' ? <View style={styles.document}><Icon name="insert-drive-file" size={28} color="#0066cc" /><Text numberOfLines={2}>{item.mediaName || item.content}</Text></View>
-          : <Text style={styles.messageText}>{item.content}</Text>}
-        <View style={styles.meta}><Text style={styles.time}>{item.isStarred ? '★ ' : ''}{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>{mine && <Text style={[styles.ticks, item.status === 'read' && { color: '#1c9ee8' }]}>{statusIcon(item)}</Text>}</View>
-      </TouchableOpacity>
+      <View style={[styles.messageWrapper, isSelected && styles.selectedWrapper]}>
+        <TouchableOpacity activeOpacity={0.8} onLongPress={() => showMessageActions(message)} onPress={() => selectedIds.size > 0 ? toggleSelection(idOf(message)) : (message.type !== 'TEXT' && openMessage(message))} style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
+          {message.deletedForEveryone ? <Text style={styles.deleted}>🚫 Este mensaje fue eliminado</Text> : message.viewOnce ? (
+            <View style={styles.onceRow}><Icon name={message.type === 'VIDEO' ? 'videocam' : 'image'} size={23} color="#0066cc" /><Text style={styles.onceText}>{message.viewOnceOpened ? 'Contenido abierto' : 'Ver una vez'}</Text></View>
+          ) : message.type === 'IMAGE' && mediaUri ? <Image source={{ uri: mediaUri }} style={styles.image} />
+            : message.type === 'VIDEO' && mediaUri ? <Video source={{ uri: mediaUri }} paused controls style={styles.video} />
+            : message.type === 'AUDIO' && mediaUri ? <Video source={{ uri: mediaUri }} paused controls style={styles.audio} />
+            : message.type === 'DOCUMENT' ? <View style={styles.document}><Icon name="insert-drive-file" size={28} color="#0066cc" /><Text numberOfLines={2}>{message.mediaName || message.content}</Text></View>
+            : <Text style={styles.messageText}>{message.content}</Text>}
+          <View style={styles.meta}><Text style={styles.time}>{message.isStarred ? '★ ' : ''}{new Date(message.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</Text>{mine && <Text style={[styles.ticks, message.status === 'read' && { color: '#1c9ee8' }]}>{statusIcon(message)}</Text>}</View>
+        </TouchableOpacity>
+      </View>
     );
   };
 
   const otherChats = useMemo(() => chats.filter((item) => item.id !== chatId), [chats, chatId]);
 
+  const formattedMessages = useMemo(() => {
+    if (!Array.isArray(messages)) return [];
+    const result: any[] = [];
+    let lastDate = '';
+    messages.forEach((msg) => {
+      const msgDate = new Date(msg.createdAt).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' });
+      if (msgDate !== lastDate) {
+        result.push({ type: 'DATE_SEPARATOR', date: msgDate, id: `sep-${msgDate}` });
+        lastDate = msgDate;
+      }
+      result.push(msg);
+    });
+    return result;
+  }, [messages]);
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={88}>
       {isLoading && messages.length === 0 ? <ActivityIndicator style={{ flex: 1 }} size="large" color="#0066cc" /> : (
-        <FlatList data={Array.isArray(messages) ? messages : []} keyExtractor={(item, index) => String(idOf(item) || `message-${index}`)} renderItem={renderMessage} contentContainerStyle={styles.list} />
+        <FlatList data={formattedMessages} keyExtractor={(item, index) => String(item.type === 'DATE_SEPARATOR' ? item.id : idOf(item) || `msg-${index}`)} renderItem={renderItem} contentContainerStyle={styles.list} />
       )}
-      <View style={styles.inputBar}>
-        {!isRecording && <>
-          <TouchableOpacity onPress={openAttachmentMenu} style={styles.iconButton}><Icon name="attach-file" size={24} color="#555" /></TouchableOpacity>
-          <TextInput style={styles.input} placeholder="Escribe un mensaje…" placeholderTextColor="#888" value={text} onChangeText={onTextChange} multiline />
-        </>}
-        {text.trim() && !isRecording ? <TouchableOpacity style={styles.send} onPress={() => { void sendMessage(chatId, text.trim()); setText(''); onTextChange(''); }}><Icon name="send" size={21} color="#fff" /></TouchableOpacity>
-          : <VoiceRecorder onRecordingChange={setIsRecording} onSend={(uri, durationMs) => void sendMedia(chatId, uri, 'voice-note.m4a', 'audio/mp4', { durationMs })} />}
-      </View>
+      {target?.blockedByMe ? (
+        <View style={styles.blockedBar}>
+          <Text style={styles.blockedText}>Has bloqueado a este contacto.</Text>
+          <TouchableOpacity onPress={() => openChatMenu()}><Text style={styles.unblockText}>Desbloquear</Text></TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.inputBar}>
+          {!isRecording && <>
+            <TouchableOpacity onPress={openAttachmentMenu} style={styles.iconButton}><Icon name="attach-file" size={24} color="#555" /></TouchableOpacity>
+            <TextInput style={styles.input} placeholder="Escribe un mensaje…" placeholderTextColor="#888" value={text} onChangeText={onTextChange} multiline />
+          </>}
+          {text.trim() && !isRecording ? <TouchableOpacity style={styles.send} onPress={() => { void sendMessage(chatId, text.trim()); setText(''); onTextChange(''); }}><Icon name="send" size={21} color="#fff" /></TouchableOpacity>
+            : <VoiceRecorder onRecordingChange={setIsRecording} onSend={(uri, durationMs) => void sendMedia(chatId, uri, 'voice-note.m4a', 'audio/mp4', { durationMs })} />}
+        </View>
+      )}
 
       <Modal visible={Boolean(viewer)} animationType="fade" onRequestClose={() => setViewer(null)}>
         <View style={styles.viewer}>
@@ -205,12 +344,16 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#e7ded5' }, list: { padding: 12, flexGrow: 1, justifyContent: 'flex-end' },
-  bubble: { maxWidth: '82%', padding: 9, borderRadius: 10, marginBottom: 8 }, mine: { alignSelf: 'flex-end', backgroundColor: '#d7f9c8' }, theirs: { alignSelf: 'flex-start', backgroundColor: '#fff' },
+  dateSeparatorContainer: { alignSelf: 'center', backgroundColor: '#e1f5fe', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginVertical: 12 }, dateSeparatorText: { fontSize: 12, color: '#004d40', fontWeight: '500' },
+  messageWrapper: { width: '100%', marginBottom: 8, paddingHorizontal: 4, borderRadius: 8 },
+  selectedWrapper: { backgroundColor: 'rgba(0, 102, 204, 0.15)' },
+  bubble: { maxWidth: '82%', padding: 9, borderRadius: 10 }, mine: { alignSelf: 'flex-end', backgroundColor: '#d7f9c8' }, theirs: { alignSelf: 'flex-start', backgroundColor: '#fff' },
   messageText: { fontSize: 16, color: '#111' }, deleted: { fontSize: 15, color: '#777', fontStyle: 'italic' },
   image: { width: 230, height: 220, borderRadius: 8 }, video: { width: 230, height: 220, borderRadius: 8 }, audio: { width: 240, height: 46 },
   document: { width: 230, flexDirection: 'row', gap: 8, alignItems: 'center', padding: 8, backgroundColor: '#f1f3f4', borderRadius: 8 },
   onceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 7 }, onceText: { color: '#0066cc', fontWeight: '600' },
   meta: { flexDirection: 'row', alignSelf: 'flex-end', gap: 3, marginTop: 4 }, time: { fontSize: 10, color: '#666' }, ticks: { fontSize: 11, color: '#777' },
+  blockedBar: { padding: 16, backgroundColor: '#f9f9f9', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#ddd' }, blockedText: { color: '#555', fontSize: 15 }, unblockText: { color: '#0066cc', fontSize: 15, fontWeight: '600', marginTop: 4 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, backgroundColor: '#fff' }, iconButton: { padding: 9 }, input: { flex: 1, minHeight: 40, maxHeight: 110, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: '#f1f2f3', color: '#111' }, send: { width: 42, height: 42, borderRadius: 21, marginLeft: 7, backgroundColor: '#0066cc', alignItems: 'center', justifyContent: 'center' },
   viewer: { flex: 1, backgroundColor: '#000' }, viewerBar: { paddingTop: 54, paddingHorizontal: 18, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between' },
   modalShade: { flex: 1, backgroundColor: 'rgba(0,0,0,.45)', justifyContent: 'flex-end' }, forwardSheet: { maxHeight: '70%', backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18 }, sheetTitle: { fontSize: 20, fontWeight: '700', marginBottom: 10 }, forwardRow: { paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' }, forwardName: { fontSize: 17 }, cancel: { color: '#0066cc', textAlign: 'center', padding: 15, fontWeight: '700' },

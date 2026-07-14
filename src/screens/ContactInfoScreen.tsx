@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActionSheetIOS, Alert, Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useAuthStore } from '../store/useAuthStore';
 import { useChatStore } from '../store/useChatStore';
 import { useWebRTCStore } from '../store/useWebRTCStore';
 import { chatLocalBytes, clearChatFiles, resolveMediaUrl } from '../lib/offlineFiles';
+import { fetchJson } from '../lib/api';
 import { Message } from '../types';
 
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
@@ -35,6 +36,33 @@ export default function ContactInfoScreen({ route }: any) {
     { text: 'Liberar', style: 'destructive', onPress: async () => { await clearChatFiles(chatId); clearLocalMedia(chatId); setLocalBytes(0); } },
   ]);
 
+  const handleClearChat = () => {
+    ActionSheetIOS.showActionSheetWithOptions({
+      title: 'Vaciar Chat',
+      options: ['Cancelar', 'Solo texto', 'Solo multimedia', 'Vaciar todo'],
+      cancelButtonIndex: 0,
+      destructiveButtonIndex: [1, 2, 3],
+    }, async (index) => {
+      if (index === 0) return;
+      const type = index === 1 ? 'text' : index === 2 ? 'media' : 'all';
+      try {
+        await fetchJson(`/chats/${chatId}/clear`, {
+          method: 'POST',
+          body: JSON.stringify({ type })
+        });
+        if (type !== 'text') {
+          await clearChatFiles(chatId);
+          clearLocalMedia(chatId);
+          setLocalBytes(0);
+        }
+        void loadMessages(chatId);
+        Alert.alert('Éxito', 'El chat ha sido vaciado correctamente.');
+      } catch (e: any) {
+        Alert.alert('Error', e.message);
+      }
+    });
+  };
+
   const avatar = resolveMediaUrl(avatarUrl || chat?.avatarUrl);
   return (
     <ScrollView style={styles.container}>
@@ -45,6 +73,7 @@ export default function ContactInfoScreen({ route }: any) {
       {media.length > 0 && <View style={styles.grid}>{media.slice(-12).map((message) => <TouchableOpacity key={message._id} onPress={() => open(message)}>{message.type === 'IMAGE' ? <Image source={{ uri: message.localUri || resolveMediaUrl(message.mediaUrl)! }} style={styles.thumb} /> : <View style={[styles.thumb, styles.videoThumb]}><Icon name="play-circle" size={32} color="#fff" /></View>}</TouchableOpacity>)}</View>}
       <View style={styles.section}><Text style={styles.sectionTitle}>Mensajes destacados</Text><Text style={styles.subtitle}>{starred.length} mensajes</Text>{starred.slice(0, 10).map((message) => <Text key={message._id} numberOfLines={2} style={styles.starred}>★ {message.content}</Text>)}</View>
       <TouchableOpacity style={styles.section} onPress={clear}><Text style={styles.sectionTitle}>Administrar almacenamiento</Text><Text style={styles.subtitle}>{formatBytes(localBytes)} guardados offline · {formatBytes(knownBytes)} de contenido conocido</Text><Text style={styles.link}>Liberar copias offline</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.section} onPress={handleClearChat}><Text style={[styles.sectionTitle, { color: '#d32f2f' }]}>Vaciar chat</Text><Text style={styles.subtitle}>Eliminar mensajes de tu dispositivo de forma permanente</Text></TouchableOpacity>
     </ScrollView>
   );
 }
