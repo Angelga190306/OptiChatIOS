@@ -2,7 +2,10 @@ import { NativeEventEmitter, NativeModules } from 'react-native';
 
 const { ScreenshotDetector } = NativeModules;
 
-export const screenshotListener = new NativeEventEmitter(ScreenshotDetector);
+let screenshotListener: NativeEventEmitter | null = null;
+if (ScreenshotDetector) {
+  screenshotListener = new NativeEventEmitter(ScreenshotDetector);
+}
 
 /**
  * Suscribe una función al evento de captura de pantalla.
@@ -10,7 +13,7 @@ export const screenshotListener = new NativeEventEmitter(ScreenshotDetector);
  * @returns Una función para cancelar la suscripción.
  */
 export const subscribeToScreenshots = (callback: (event: any) => void) => {
-  if (!ScreenshotDetector) {
+  if (!screenshotListener) {
     console.warn('ScreenshotDetector native module not found');
     return () => {};
   }
