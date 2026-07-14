@@ -28,7 +28,7 @@ const idOf = (message: Message) => message._id || message.id || '';
 export default function ChatScreen() {
   const route = useRoute<ChatRoute>();
   const navigation = useNavigation<any>();
-  const { chatId, chatName, avatarUrl } = route.params;
+  const { chatId, chatName, avatarUrl, mediaToSend } = route.params;
   const chats = useChatStore((state) => state.chats);
   const messages = useChatStore((state) => state.messagesByChat?.[chatId] || []);
   const isLoading = useChatStore((state) => state.isLoadingMessages);
@@ -153,6 +153,15 @@ export default function ChatScreen() {
   }, [chatId]);
 
   useEffect(() => {
+    if (mediaToSend) {
+      void sendMedia(chatId, mediaToSend.uri, `media-${Date.now()}`, mediaToSend.mime, { viewOnce: mediaToSend.viewOnce });
+      if (mediaToSend.caption) void sendMessage(chatId, mediaToSend.caption);
+      // Clear the params so it doesn't resend on re-render
+      navigation.setParams({ mediaToSend: undefined });
+    }
+  }, [mediaToSend]);
+
+  useEffect(() => {
     if (viewer && viewer.once) {
       const unsubscribe = subscribeToScreenshots(() => {
         useSocketStore.getState().reportScreenshot(chatId, viewer.message._id || viewer.message.id);
@@ -170,17 +179,12 @@ export default function ChatScreen() {
     typingTimer.current = setTimeout(() => socket?.emit('typing_stop', { conversationId: chatId }), 1600);
   };
 
-  const choosePhotoOrVideo = async () => {
-    const result = await launchImageLibrary({ mediaType: 'mixed', selectionLimit: 1, quality: 0.9 });
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    const mime = asset.type || (asset.uri.toLowerCase().includes('.mov') ? 'video/quicktime' : 'image/jpeg');
-    const send = (viewOnce: boolean) => void sendMedia(chatId, asset.uri!, asset.fileName || `media-${Date.now()}`, mime, { viewOnce });
-    Alert.alert('Enviar multimedia', '¿Cómo quieres enviarla?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Normal', onPress: () => send(false) },
-      { text: 'Ver una vez', onPress: () => send(true) },
-    ]);
+  const choosePhotoOrVideo = () => {
+    navigation.navigate('MultiMediaPicker', { chatId });
+  };
+
+  const openCamera = () => {
+    navigation.navigate('CameraCapture', { chatId });
   };
 
   const chooseDocument = async () => {
@@ -194,8 +198,8 @@ export default function ChatScreen() {
   };
 
   const openAttachmentMenu = () => ActionSheetIOS.showActionSheetWithOptions({
-    options: ['Cancelar', 'Foto o video', 'Documento'], cancelButtonIndex: 0,
-  }, (index) => { if (index === 1) void choosePhotoOrVideo(); if (index === 2) void chooseDocument(); });
+    options: ['Cancelar', 'Cámara', 'Foto o video', 'Documento'], cancelButtonIndex: 0,
+  }, (index) => { if (index === 1) void openCamera(); if (index === 2) void choosePhotoOrVideo(); if (index === 3) void chooseDocument(); });
 
   const openViewOnce = async (message: Message) => {
     if (message.senderId === user?.id || message.viewOnceOpened) return;

@@ -21,7 +21,9 @@ import CallsTab from './src/screens/CallsTab';
 import SettingsTab from './src/screens/SettingsTab';
 import ChatScreen from './src/screens/ChatScreen';
 import ContactInfoScreen from './src/screens/ContactInfoScreen';
-
+import MultiMediaPickerScreen from './src/screens/MultiMediaPickerScreen';
+import MultiMediaEditorScreen from './src/screens/MultiMediaEditorScreen';
+import CameraCaptureScreen from './src/screens/CameraCaptureScreen';
 import { useAuthStore } from './src/store/useAuthStore';
 import { useSocketStore } from './src/store/useSocketStore';
 import { useChatStore } from './src/store/useChatStore';
@@ -35,8 +37,11 @@ export type RootStackParamList = {
   Login: undefined;
   ProfileSetup: undefined;
   MainTabs: undefined;
-  Chat: { chatId: string; chatName: string; avatarUrl?: string };
+  Chat: { chatId: string; chatName: string; avatarUrl?: string; mediaToSend?: { uri: string; caption?: string; viewOnce: boolean; mime: string } };
   ContactInfo: { chatId: string; chatName: string; avatarUrl?: string };
+  MultiMediaPicker: { chatId?: string };
+  MultiMediaEditor: { assets: any[]; chatId?: string };
+  CameraCapture: { chatId?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -245,6 +250,21 @@ function App() {
                   name="ContactInfo"
                   component={ContactInfoScreen}
                   options={{ title: 'Info. del contacto' }}
+                />
+                <Stack.Screen
+                  name="MultiMediaPicker"
+                  component={MultiMediaPickerScreen}
+                  options={{ headerShown: false, presentation: 'modal' }}
+                />
+                <Stack.Screen
+                  name="MultiMediaEditor"
+                  component={MultiMediaEditorScreen}
+                  options={{ headerShown: false, presentation: 'fullScreenModal' }}
+                />
+                <Stack.Screen
+                  name="CameraCapture"
+                  component={CameraCaptureScreen}
+                  options={{ headerShown: false, presentation: 'fullScreenModal' }}
                 />
               </>
             )}
