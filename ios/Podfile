@@ -10,13 +10,13 @@ ENV['RCT_NEW_ARCH_ENABLED'] = '0'
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS'] || 'static'
+linkage = ENV['USE_FRAMEWORKS']
 if linkage != nil
   Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
   use_frameworks! :linkage => linkage.to_sym
 end
 
-$RNFirebaseAsStaticFramework = true
+
 
 target 'OptiChatIOS' do
   config = use_native_modules!
