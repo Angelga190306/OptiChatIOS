@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, SafeAreaView } from 'react-native';
-import { Camera, useCameraDevice, useCameraFormat } from 'react-native-vision-camera';
+import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,21 +14,29 @@ export default function CameraCaptureScreen() {
   const [hasPermission, setHasPermission] = useState(false);
   const [cameraPosition, setCameraPosition] = useState<'back' | 'front'>('back');
   const [isRecording, setIsRecording] = useState(false);
+  const [flashOn, setFlashOn] = useState(false);
 
   const device = useCameraDevice(cameraPosition);
-  const camera = useRef<Camera>(null);
+  // ⚠️ PENDIENTE: react-native-vision-camera instalado es v5 (Nitro), pero esta
+  // pantalla usa la API v4 (props `photo`/`video`/`audio`, `Camera.requestXPermission`,
+  // `camera.current.takePhoto`/`startRecording`). En v5 se usa `outputs`,
+  // `useCameraPermission`/`useMicrophonePermission`, `CameraPhotoOutput.capturePhoto`
+  // y `Recorder`. La migración requiere verificación en dispositivo físico y se
+  // deja pendiente. Se conservan las llamadas v4 con casts `any` para no alterar el
+  // comportamiento existente y mantener el type-check del resto del proyecto limpio.
+  const camera = useRef<any>(null);
 
   useEffect(() => {
     (async () => {
-      const cameraStatus = await Camera.requestCameraPermission();
-      const microphoneStatus = await Camera.requestMicrophonePermission();
+      const cameraStatus = await (Camera as any).requestCameraPermission();
+      const microphoneStatus = await (Camera as any).requestMicrophonePermission();
       setHasPermission(cameraStatus === 'granted' && microphoneStatus === 'granted');
     })();
   }, []);
 
   const takePhoto = async () => {
     if (camera.current) {
-      const photo = await camera.current.takePhoto();
+      const photo = await camera.current.takePhoto({ flash: flashOn ? 'on' : 'off' });
       navigation.replace('MultiMediaEditor', {
         chatId: route.params?.chatId,
         assets: [{
@@ -40,11 +48,15 @@ export default function CameraCaptureScreen() {
     }
   };
 
+  const openGallery = () => {
+    navigation.replace('MultiMediaPicker', { chatId: route.params?.chatId });
+  };
+
   const startRecording = () => {
     if (camera.current) {
       setIsRecording(true);
       camera.current.startRecording({
-        onRecordingFinished: (video) => {
+        onRecordingFinished: (video: any) => {
           setIsRecording(false);
           navigation.replace('MultiMediaEditor', {
             chatId: route.params?.chatId,
@@ -55,7 +67,7 @@ export default function CameraCaptureScreen() {
             }]
           });
         },
-        onRecordingError: (error) => {
+        onRecordingError: (error: any) => {
           setIsRecording(false);
           console.error(error);
         }
@@ -80,9 +92,7 @@ export default function CameraCaptureScreen() {
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={true}
-        photo={true}
-        video={true}
-        audio={true}
+        {...({ photo: true, video: true, audio: true } as any)}
       />
       
       {/* Top Controls */}
@@ -90,14 +100,14 @@ export default function CameraCaptureScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
           <Icon name="close" size={28} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.iconButton}>
-          <Icon name="flash-off" size={28} color="#fff" />
+        <TouchableOpacity style={styles.iconButton} onPress={() => setFlashOn((v) => !v)}>
+          <Icon name={flashOn ? 'flash' : 'flash-off'} size={28} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {/* Bottom Controls */}
       <View style={styles.bottomControls}>
-        <TouchableOpacity style={styles.iconButton}>
+        <TouchableOpacity style={styles.iconButton} onPress={openGallery}>
           <Icon name="images" size={28} color="#fff" />
         </TouchableOpacity>
 

@@ -10,22 +10,33 @@ import { Message } from '../types';
 
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 
+// Referencia estable para evitar re-renders infinitos (mismo anti-patrón que ChatScreen).
+const EMPTY: Message[] = [];
+
 export default function ContactInfoScreen({ route }: any) {
   const { chatId, chatName, avatarUrl } = route.params;
   const user = useAuthStore((state) => state.user);
   const chat = useChatStore((state) => state.chats.find((item) => item.id === chatId));
-  const messages = useChatStore((state) => state.messagesByChat?.[chatId] || []);
+  const messages = useChatStore((state) => state.messagesByChat?.[chatId] ?? EMPTY);
   const { loadMessages, clearLocalMedia } = useChatStore.getState();
   const startCall = useWebRTCStore((state) => state.startCall);
   const [localBytes, setLocalBytes] = useState(0);
+  const [starred, setStarred] = useState<Message[]>([]);
   const target = Array.isArray(chat?.participants) ? chat?.participants.find((participant) => participant?.id !== user?.id) : undefined;
   const media = useMemo(() => messages.filter((message) => ['IMAGE', 'VIDEO'].includes(message.type) && !message.viewOnce && !message.deletedForEveryone), [messages]);
   const documents = useMemo(() => messages.filter((message) => ['DOCUMENT', 'AUDIO'].includes(message.type) && !message.deletedForEveryone), [messages]);
   const links = useMemo(() => messages.filter((message) => message.type === 'TEXT' && /https?:\/\/\S+/i.test(message.content)), [messages]);
-  const starred = useMemo(() => messages.filter((message) => message.isStarred), [messages]);
   const knownBytes = messages.reduce((total, message) => total + Number(message.mediaSize || 0), 0);
 
-  useEffect(() => { void loadMessages(chatId); void chatLocalBytes(chatId).then(setLocalBytes); }, [chatId]);
+  // Los mensajes destacados se obtienen del servidor (GET /chats/:id/starred) en
+  // lugar de filtrarlos solo de la memoria, para incluir los que no están paginados.
+  useEffect(() => {
+    void loadMessages(chatId);
+    void chatLocalBytes(chatId).then(setLocalBytes);
+    void fetchJson<{ messages: Message[] }>(`/chats/${chatId}/starred`)
+      .then((res) => setStarred(res.messages))
+      .catch(() => undefined);
+  }, [chatId]);
   const call = (video: boolean) => target && startCall(target.id, target.displayName || target.phoneNumber, video);
   const open = (message: Message) => {
     const uri = message.localUri || resolveMediaUrl(message.mediaUrl);
@@ -44,13 +55,15 @@ export default function ContactInfoScreen({ route }: any) {
       destructiveButtonIndex: [1, 2, 3],
     }, async (index) => {
       if (index === 0) return;
-      const type = index === 1 ? 'text' : index === 2 ? 'media' : 'all';
+      // El backend espera { clearMessages, clearMedia } (booleans), no { type }.
+      const clearMessages = index === 1 || index === 3;
+      const clearMedia = index === 2 || index === 3;
       try {
         await fetchJson(`/chats/${chatId}/clear`, {
           method: 'POST',
-          body: JSON.stringify({ type })
+          body: JSON.stringify({ clearMessages, clearMedia })
         });
-        if (type !== 'text') {
+        if (clearMedia) {
           await clearChatFiles(chatId);
           clearLocalMedia(chatId);
           setLocalBytes(0);

@@ -20,7 +20,7 @@ interface ChatState {
   loadChats: () => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
   sendMessage: (chatId: string, content: string) => Promise<void>;
-  sendMedia: (chatId: string, uri: string, fileName: string, mimeType: string, options?: { durationMs?: number; viewOnce?: boolean }) => Promise<void>;
+  sendMedia: (chatId: string, uri: string, fileName: string, mimeType: string, options?: { durationMs?: number; viewOnce?: boolean; viewOnceLimit?: number }) => Promise<void>;
   flushOutbox: () => Promise<void>;
   createChat: (phoneNumber: string) => Promise<string>;
   upsertMessage: (message: Message) => void;
@@ -29,9 +29,12 @@ interface ChatState {
   updateStarred: (conversationId: string, id: string, starred: boolean) => void;
   toggleStarred: (message: Message) => Promise<void>;
   deleteMessage: (message: Message, scope: 'me' | 'everyone') => Promise<void>;
+  bulkDelete: (conversationId: string, messageIds: string[], scope: 'me' | 'everyone') => Promise<void>;
   forwardMessage: (message: Message, targetChatId: string) => Promise<void>;
   setPresence: (userId: string, isOnline: boolean, lastSeen?: string | null) => void;
   setTyping: (conversationId: string, isTyping: boolean) => void;
+  markDelivered: (conversationId: string) => Promise<void>;
+  syncContacts: (phoneNumbers: string[]) => Promise<void>;
   clearLocalMedia: (conversationId: string) => void;
   updateBlockStatus: (userId: string, blockedByMe: boolean) => void;
 }
@@ -46,7 +49,11 @@ async function uploadPending(item: PendingMessage): Promise<Message> {
   const form = new FormData();
   form.append('clientMessageId', item.clientMessageId);
   if (item.durationMs != null) form.append('durationMs', String(item.durationMs));
-  if (item.viewOnce) form.append('viewOnce', 'true');
+  if (item.viewOnce) {
+    form.append('viewOnce', 'true');
+    const limit = Math.max(1, Math.min(5, item.viewOnceLimit ?? 1));
+    form.append('viewOnceLimit', String(limit));
+  }
   form.append('file', { uri: item.localUri, name: item.fileName, type: item.mimeType } as any);
   return fetchJson<Message>(`/chats/${item.conversationId}/media`, { method: 'POST', body: form });
 }
@@ -128,7 +135,8 @@ export const useChatStore = create<ChatState>()(
         const localUri = await copyToOffline(uri, conversationId, fileName);
         const pending: PendingMessage = {
           clientMessageId: createClientId(), conversationId, kind: 'media', localUri, fileName, mimeType,
-          durationMs: options.durationMs, viewOnce: options.viewOnce, createdAt: new Date().toISOString(),
+          durationMs: options.durationMs, viewOnce: options.viewOnce, viewOnceLimit: options.viewOnceLimit,
+          createdAt: new Date().toISOString(),
         };
         const type = mimeType.startsWith('image/') ? 'IMAGE' : mimeType.startsWith('video/') ? 'VIDEO' : mimeType.startsWith('audio/') ? 'AUDIO' : 'DOCUMENT';
         get().upsertMessage({
@@ -136,7 +144,8 @@ export const useChatStore = create<ChatState>()(
           conversationId, senderId: user.id, senderName: user.displayName || user.phoneNumber,
           content: type === 'IMAGE' ? '📷 Foto' : type === 'VIDEO' ? '🎥 Video' : type === 'AUDIO' ? 'Nota de voz' : `📄 ${fileName}`,
           type, status: 'pending', localUri, mediaName: fileName, mediaMimeType: mimeType,
-          mediaDuration: options.durationMs, viewOnce: options.viewOnce, createdAt: pending.createdAt,
+          mediaDuration: options.durationMs, viewOnce: options.viewOnce, viewOnceLimit: options.viewOnceLimit,
+          createdAt: pending.createdAt,
         });
         set((state) => ({ outbox: [...state.outbox, pending] }));
         if (get().isOnline) await get().flushOutbox();
@@ -209,6 +218,18 @@ export const useChatStore = create<ChatState>()(
         get().applyDeletedMessage({ conversationId: message.conversationId, messageId: id, ...response });
       },
 
+      bulkDelete: async (conversationId, messageIds, scope) => {
+        const response = await fetchJson<{ count: number }>(`/chats/${conversationId}/messages/bulk-delete`, {
+          method: 'POST',
+          body: JSON.stringify({ messageIds, scope }),
+        });
+        // Aplica el evento por cada mensaje, igual que harían N deleteMessage() en loop.
+        for (const messageId of messageIds) {
+          get().applyDeletedMessage({ conversationId, messageId, mode: scope });
+        }
+        return void response;
+      },
+
       forwardMessage: async (message, targetChatId) => {
         const forwarded = await fetchJson<Message>(`/chats/${targetChatId}/messages/${getMessageId(message)}/forward`, { method: 'POST', body: '{}' });
         get().upsertMessage(forwarded);
@@ -219,6 +240,24 @@ export const useChatStore = create<ChatState>()(
       })) })),
 
       setTyping: (conversationId, isTyping) => set((state) => ({ chats: state.chats.map((chat) => chat.id === conversationId ? { ...chat, isTyping } : chat) })),
+
+      markDelivered: async (conversationId) => {
+        try {
+          await fetchJson(`/chats/${conversationId}/delivered`, { method: 'POST', body: '{}' });
+        } catch (error) {
+          console.warn('No se pudo marcar la conversación como entregada', error);
+        }
+      },
+
+      // Sincroniza contactos con el backend. Requiere los números de teléfono de
+      // la agenda del dispositivo; la lectura de la agenda necesita
+      // `react-native-contacts` (dependencia nativa aún no instalada → pendiente).
+      syncContacts: async (phoneNumbers) => {
+        await fetchJson('/users/sync-contacts', {
+          method: 'POST',
+          body: JSON.stringify({ phoneNumbers }),
+        });
+      },
       clearLocalMedia: (conversationId) => set((state) => ({ messagesByChat: {
         ...state.messagesByChat,
         [conversationId]: (state.messagesByChat[conversationId] || []).map((message) => ({ ...message, localUri: null })),

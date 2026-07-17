@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -16,10 +16,36 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { fetchJson } from '../lib/api';
+import { ApiError, fetchJson } from '../lib/api';
 import { cacheOwnAvatar, resolveMediaUrl } from '../lib/offlineFiles';
 import { useAuthStore } from '../store/useAuthStore';
-import { BackupInfo, User } from '../types';
+import { useChatStore } from '../store/useChatStore';
+import { BackupAttemptState, BackupInfo, User } from '../types';
+
+/**
+ * Traduce un error de copia/restauración a un mensaje accionable. Cuando el
+ * backend responde 503 con `GOOGLE_DRIVE_AUTH_REQUIRED` significa que la Service
+ * Account no tiene cuota en el Drive personal del propietario y se requiere
+ * OAuth del propietario o una Unidad compartida; eso es configuración del
+ * servidor, no algo que el usuario pueda resolver desde la app.
+ */
+function formatBackupError(error: unknown): { title: string; detail: string } {
+  if (error instanceof ApiError && error.status === 503 && (error.body as any)?.code === 'GOOGLE_DRIVE_AUTH_REQUIRED') {
+    return {
+      title: 'Google Drive no está autorizado',
+      detail: 'El administrador del servidor debe completar la autorización en /api/google-auth/init (o usar una Unidad compartida) para que las copias tengan cuota en el Drive del propietario.',
+    };
+  }
+  const message = error instanceof Error ? error.message : 'Error desconocido.';
+  return { title: 'No se pudo completar la copia', detail: message };
+}
+
+function lastAttemptBanner(lastAttempt: BackupAttemptState | null | undefined): string | null {
+  if (!lastAttempt) return null;
+  if (lastAttempt.status !== 'failed') return null;
+  if (lastAttempt.trigger === 'manual') return null;
+  return 'La última copia automática falló; se reintentará al iniciar el servidor o a las 2:00 AM.';
+}
 
 interface Device {
   id: string;
@@ -30,7 +56,9 @@ interface Device {
 }
 
 export default function SettingsTab() {
-  const { user, updateUser, logout } = useAuthStore();
+  // Selectores por campo para evitar suscribirse a todo el store de auth.
+  const user = useAuthStore((s) => s.user);
+  const { updateUser, logout } = useAuthStore.getState();
   const [profileOpen, setProfileOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
@@ -41,6 +69,15 @@ export default function SettingsTab() {
   const [backup, setBackup] = useState<BackupInfo | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [blockedOpen, setBlockedOpen] = useState(false);
+
+  // Contactos bloqueados: se derivan de los chats 1:1 cuyo participante tiene
+  // `blockedByMe === true` (el backend no expone un endpoint de lista de bloqueados).
+  const chats = useChatStore((s) => s.chats);
+  const blockedContacts = useMemo(
+    () => chats.flatMap((c) => (c.participants || []).filter((p) => p.blockedByMe)),
+    [chats],
+  );
 
   const loadBackup = async () => {
     try {
@@ -131,8 +168,9 @@ export default function SettingsTab() {
       });
       await loadBackup();
       Alert.alert('Copia terminada', 'Tus datos se guardaron correctamente.');
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+    } catch (e) {
+      const { title, detail } = formatBackupError(e);
+      Alert.alert(title, detail);
     } finally {
       setBusy(false);
     }
@@ -156,6 +194,57 @@ export default function SettingsTab() {
                 'Restaurada',
                 'Vuelve a Chats para sincronizar el contenido.',
               );
+            } catch (e) {
+              const { title, detail } = formatBackupError(e);
+              Alert.alert(title, detail);
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  const unblock = (userId: string) =>
+    Alert.alert('Desbloquear', '¿Desbloquear a este contacto?', [
+      { text: 'Cancelar' },
+      {
+        text: 'Desbloquear',
+        onPress: async () => {
+          try {
+            await fetchJson(`/users/${userId}/block`, { method: 'DELETE' });
+            useChatStore.getState().updateBlockStatus(userId, false);
+          } catch (e: any) {
+            Alert.alert('Error', e.message);
+          }
+        },
+      },
+    ]);
+
+  const changeNumber = () => {
+    const prompt = (Alert as any).prompt;
+    if (typeof prompt !== 'function') {
+      Alert.alert('Cambiar número', 'No disponible en este dispositivo.');
+      return;
+    }
+    prompt.call(
+      Alert,
+      'Cambiar número',
+      'Introduce tu nuevo número con código de país (ej. +521234567890):',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cambiar',
+          onPress: async (value?: string) => {
+            const phone = (value || '').trim();
+            if (!phone) return;
+            setBusy(true);
+            try {
+              const result = await fetchJson<{ user: User }>('/users/me/change-number', {
+                method: 'POST',
+                body: JSON.stringify({ newPhoneNumber: phone }),
+              });
+              updateUser({ phoneNumber: result.user.phoneNumber });
+              Alert.alert('Número cambiado', 'Tu número se actualizó correctamente.');
             } catch (e: any) {
               Alert.alert('Error', e.message);
             } finally {
@@ -165,6 +254,32 @@ export default function SettingsTab() {
         },
       ],
     );
+  };
+
+  const deleteAccount = () =>
+    Alert.alert(
+      'Eliminar cuenta',
+      'Esto borrará tu cuenta y todos sus datos del servidor de forma permanente. ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await fetchJson('/users/me/account', { method: 'DELETE' });
+              logout();
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+
   const avatar = user?.localAvatarUri || resolveMediaUrl(user?.avatarUrl);
 
   return (
@@ -231,6 +346,12 @@ export default function SettingsTab() {
               )
             }
           />
+          <Row
+            icon="phone"
+            title="Cambiar número"
+            subtitle={user?.phoneNumber || ''}
+            onPress={changeNumber}
+          />
         </View>
         <TouchableOpacity
           style={styles.logout}
@@ -250,6 +371,9 @@ export default function SettingsTab() {
           }
         >
           <Text style={styles.logoutText}>Cerrar sesión</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.logout} onPress={deleteAccount}>
+          <Text style={[styles.logoutText, { color: '#b3261e' }]}>Eliminar cuenta</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -331,6 +455,11 @@ export default function SettingsTab() {
               {backup?.formattedSize || '0 B'} · {backup?.messages || 0}{' '}
               mensajes · {backup?.mediaFiles || 0} archivos
             </Text>
+            {lastAttemptBanner(backup?.lastAttempt) && (
+              <Text style={styles.warningText}>
+                {lastAttemptBanner(backup?.lastAttempt)}
+              </Text>
+            )}
           </View>
           <TouchableOpacity style={styles.card} onPress={chooseFrequency}>
             <Text style={styles.cardTitle}>Copia automática</Text>
@@ -423,8 +552,8 @@ export default function SettingsTab() {
             <Row
               icon="block"
               title="Contactos bloqueados"
-              subtitle="0 contactos"
-              onPress={() => Alert.alert('Bloqueados', 'Gestión de bloqueados disponible próximamente.')}
+              subtitle={`${blockedContacts.length} contactos`}
+              onPress={() => setBlockedOpen(true)}
             />
             <Row
               icon="timer"
@@ -433,6 +562,33 @@ export default function SettingsTab() {
               onPress={() => Alert.alert('Mensajes Temporales', 'Configuración de mensajes temporales en desarrollo.')}
             />
           </View>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={blockedOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setBlockedOpen(false)}
+      >
+        <SafeAreaView style={styles.modal} edges={['top', 'bottom']}>
+          <ModalHeader title="Contactos bloqueados" close={() => setBlockedOpen(false)} />
+          <FlatList
+            data={blockedContacts}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={<Text style={styles.emptyList}>No tienes contactos bloqueados.</Text>}
+            renderItem={({ item }) => (
+              <View style={styles.row}>
+                <Icon name="person" size={25} color="#0066cc" />
+                <View style={{ flex: 1, marginLeft: 13 }}>
+                  <Text style={styles.rowTitle}>{item.displayName || item.phoneNumber}</Text>
+                </View>
+                <TouchableOpacity onPress={() => unblock(item.id)}>
+                  <Text style={styles.unblockText}>Desbloquear</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -507,6 +663,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoutText: { color: '#c62828', fontSize: 16, fontWeight: '700' },
+  emptyList: { textAlign: 'center', color: '#999', marginTop: 40, paddingHorizontal: 30 },
+  unblockText: { color: '#0066cc', fontWeight: '700', fontSize: 15 },
   modal: { flex: 1, backgroundColor: '#f3f4f5', padding: 16 },
   modalHeader: {
     flexDirection: 'row',
@@ -558,6 +716,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
   },
   cardTitle: { fontWeight: '700', fontSize: 16, color: '#111' },
+  warningText: { color: '#b3261e', fontSize: 13, marginTop: 8, fontWeight: '600' },
   device: {
     flexDirection: 'row',
     gap: 12,

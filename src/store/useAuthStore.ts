@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSocketStore } from './useSocketStore';
+import { clearLocalCache } from '../lib/localCache';
 import { User } from '../types';
 
 interface AuthState {
@@ -30,6 +31,9 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         set({ user: null, accessToken: null, refreshToken: null });
         useSocketStore.getState().disconnect();
+        // Purga de caché local para que el siguiente usuario no vea datos del anterior
+        // (paridad con Android AuthRepository.logout).
+        void clearLocalCache();
       },
       updateUser: (updates) => set((state) => ({
         user: state.user ? { ...state.user, ...updates } : null,

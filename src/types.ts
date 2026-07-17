@@ -1,6 +1,22 @@
 export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT';
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
 
+/**
+ * Tipos de las rutas del navegador de pila raíz. Se definen aquí (y App.tsx
+ * los re-exporta) para que las pantallas puedan importarlos desde '../types'
+ * sin generar imports circulares desde App.tsx.
+ */
+export type RootStackParamList = {
+  Login: undefined;
+  ProfileSetup: undefined;
+  MainTabs: undefined;
+  Chat: { chatId: string; chatName?: string; avatarUrl?: string; mediaToSend?: { uri: string; caption?: string; viewOnce: boolean; mime: string } };
+  ContactInfo: { chatId: string; chatName: string; avatarUrl?: string };
+  MultiMediaPicker: { chatId?: string };
+  MultiMediaEditor: { assets: any[]; chatId?: string };
+  CameraCapture: { chatId?: string };
+};
+
 export interface User {
   id: string;
   phoneNumber: string;
@@ -49,6 +65,8 @@ export interface Message {
   clientMessageId?: string | null;
   replyTo?: string | null;
   viewOnce?: boolean;
+  viewOnceLimit?: number;
+  viewOnceRemaining?: number;
   viewOnceOpened?: boolean;
   deletedForEveryone?: boolean;
   isStarred?: boolean;
@@ -66,6 +84,7 @@ export interface PendingMessage {
   mimeType?: string;
   durationMs?: number;
   viewOnce?: boolean;
+  viewOnceLimit?: number;
   createdAt: string;
 }
 
@@ -82,6 +101,17 @@ export interface CallHistoryItem {
   otherUser: User;
 }
 
+export interface BackupAttemptState {
+  status: 'running' | 'success' | 'failed';
+  trigger: 'manual' | 'startup' | 'scheduled';
+  startedAt: string;
+  completedAt?: string;
+  lastBackup?: string;
+  sizeInBytes?: number;
+  formattedSize?: string;
+  error?: string;
+}
+
 export interface BackupInfo {
   available: boolean;
   frequency: string;
@@ -95,4 +125,5 @@ export interface BackupInfo {
   warnings: number;
   timezone: string;
   automaticBackupHour: number;
+  lastAttempt: BackupAttemptState | null;
 }

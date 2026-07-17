@@ -6,7 +6,6 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import { CameraRoll, iosRequestAddOnlyGalleryPermission } from '@react-native-camera-roll/camera-roll';
 import { pick, types } from '@react-native-documents/picker';
-import { launchImageLibrary } from 'react-native-image-picker';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 import Video from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -24,15 +23,18 @@ import { Message } from '../types';
 
 type ChatRoute = RouteProp<RootStackParamList, 'Chat'>;
 const idOf = (message: Message) => message._id || message.id || '';
+// Referencia estable para evitar re-renders infinitos: si el store aún no tiene mensajes
+// para este chat, devolvemos siempre el MISMO array vacío en lugar de uno nuevo por render.
+const EMPTY: Message[] = [];
 
 export default function ChatScreen() {
   const route = useRoute<ChatRoute>();
   const navigation = useNavigation<any>();
   const { chatId, chatName, avatarUrl, mediaToSend } = route.params;
   const chats = useChatStore((state) => state.chats);
-  const messages = useChatStore((state) => state.messagesByChat?.[chatId] || []);
+  const messages = useChatStore((state) => state.messagesByChat?.[chatId] ?? EMPTY);
   const isLoading = useChatStore((state) => state.isLoadingMessages);
-  const { loadMessages, sendMessage, sendMedia, toggleStarred, deleteMessage, forwardMessage } = useChatStore.getState();
+  const { loadMessages, sendMessage, sendMedia, toggleStarred, deleteMessage, bulkDelete, forwardMessage } = useChatStore.getState();
   const user = useAuthStore((state) => state.user);
   const accessToken = useAuthStore((state) => state.accessToken);
   const startCall = useWebRTCStore((state) => state.startCall);
@@ -41,6 +43,10 @@ export default function ChatScreen() {
   const [viewer, setViewer] = useState<{ message: Message; uri: string; once: boolean } | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [reporting, setReporting] = useState(false);
+  const [reportText, setReportText] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chat = chats.find((item) => item.id === chatId);
@@ -54,14 +60,13 @@ export default function ChatScreen() {
       destructiveButtonIndex: 4,
     }, async (index) => {
       if (index === 1) {
-        Alert.alert('Buscar', 'Función de búsqueda en desarrollo.');
+        setSearching(true);
+        setSearchQuery('');
       } else if (index === 2) {
         navigation.navigate('ContactInfo', { chatId, chatName, avatarUrl: avatarUrl || chat?.avatarUrl });
       } else if (index === 3) {
-        Alert.alert('Reportar', '¿Estás seguro que deseas reportar a este usuario?', [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Reportar', style: 'destructive', onPress: () => Alert.alert('Reportado', 'El usuario ha sido reportado.') }
-        ]);
+        setReporting(true);
+        setReportText('');
       } else if (index === 4) {
         if (!target) return;
         try {
@@ -96,13 +101,37 @@ export default function ChatScreen() {
       if (index === 0) return;
       const scope = index === 2 ? 'everyone' : 'me';
       try {
-        await Promise.all(selectedMessages.map(m => deleteMessage(m, scope)));
+        const messageIds = selectedMessages.map(idOf).filter(Boolean);
+        await bulkDelete(chatId, messageIds, scope);
         setSelectedIds(new Set());
       } catch (e: any) {
         Alert.alert('Error', 'Algunos mensajes no se pudieron eliminar: ' + e.message);
       }
     });
   };
+
+  const submitReport = async () => {
+    if (!target) return;
+    const reason = reportText.trim();
+    if (reason.length < 3) {
+      Alert.alert('Muy corto', 'El reporte debe tener al menos 3 caracteres.');
+      return;
+    }
+    try {
+      await fetchJson(`/users/${target.id}/report`, { method: 'POST', body: JSON.stringify({ message: reason }) });
+      setReporting(false);
+      setReportText('');
+      Alert.alert('Enviado', 'Tu reporte se envió al equipo de soporte.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    }
+  };
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return messages.filter((m) => !m.deletedForEveryone && m.content && m.content.toLowerCase().includes(q));
+  }, [messages, searchQuery]);
 
   useLayoutEffect(() => {
     if (selectedIds.size > 0) {
@@ -142,7 +171,7 @@ export default function ChatScreen() {
         </View>
       ),
     });
-  }, [navigation, chat, target, chatName, avatarUrl, selectedIds]);
+  }, [chat, target, chatName, avatarUrl, selectedIds]);
 
   useEffect(() => {
     void loadMessages(chatId);
@@ -164,10 +193,13 @@ export default function ChatScreen() {
   useEffect(() => {
     if (viewer && viewer.once) {
       const unsubscribe = subscribeToScreenshots(() => {
-        useSocketStore.getState().reportScreenshot(chatId, viewer.message._id || viewer.message.id);
+        void useSocketStore.getState().reportScreenshot(chatId, viewer.message._id || viewer.message.id);
         Alert.alert('Aviso', 'Se ha notificado al remitente que has tomado una captura de pantalla.');
       });
-      return () => unsubscribe();
+      return () => {
+        if (typeof unsubscribe === 'function') (unsubscribe as () => void)();
+        else if (unsubscribe && typeof (unsubscribe as any).remove === 'function') (unsubscribe as any).remove();
+      };
     }
   }, [viewer]);
 
@@ -265,6 +297,21 @@ export default function ChatScreen() {
 
   const statusIcon = (message: Message) => message.status === 'read' ? '✓✓' : message.status === 'delivered' ? '✓✓' : message.status === 'pending' ? '◷' : message.status === 'failed' ? '!' : '✓';
 
+  // Etiqueta de mensajes view-once: muestra el límite (①-⑤) y, para el remitente,
+  // cuántas vistas restantes quedan. El backend envía `viewOnceRemaining` y
+  // `viewOnceOpened` (ver server/src/routes/chats.ts:14-29).
+  const viewOnceLabel = (message: Message) => {
+    if (message.viewOnceOpened) return 'Contenido abierto';
+    const limit = Math.max(1, Math.min(5, message.viewOnceLimit ?? 1));
+    const circles = ['①', '②', '③', '④', '⑤'][limit - 1];
+    const remaining = message.viewOnceRemaining;
+    const isMine = message.senderId === user?.id;
+    if (isMine && typeof remaining === 'number') {
+      return `${circles} ${remaining} ${remaining === 1 ? 'vista restante' : 'vistas restantes'}`;
+    }
+    return `${circles} Ver ${limit === 1 ? 'una vez' : `${limit} veces`}`;
+  };
+
   const renderItem = ({ item }: { item: any }) => {
     if (item.type === 'DATE_SEPARATOR') {
       return (
@@ -282,7 +329,10 @@ export default function ChatScreen() {
       <View style={[styles.messageWrapper, isSelected && styles.selectedWrapper]}>
         <TouchableOpacity activeOpacity={0.8} onLongPress={() => showMessageActions(message)} onPress={() => selectedIds.size > 0 ? toggleSelection(idOf(message)) : (message.type !== 'TEXT' && openMessage(message))} style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
           {message.deletedForEveryone ? <Text style={styles.deleted}>🚫 Este mensaje fue eliminado</Text> : message.viewOnce ? (
-            <View style={styles.onceRow}><Icon name={message.type === 'VIDEO' ? 'videocam' : 'image'} size={23} color="#0066cc" /><Text style={styles.onceText}>{message.viewOnceOpened ? 'Contenido abierto' : 'Ver una vez'}</Text></View>
+            <View style={styles.onceRow}>
+              <Icon name={message.type === 'VIDEO' ? 'videocam' : 'image'} size={23} color="#0066cc" />
+              <Text style={styles.onceText}>{viewOnceLabel(message)}</Text>
+            </View>
           ) : message.type === 'IMAGE' && mediaUri ? <Image source={{ uri: mediaUri }} style={styles.image} />
             : message.type === 'VIDEO' && mediaUri ? <Video source={{ uri: mediaUri }} paused controls style={styles.video} />
             : message.type === 'AUDIO' && mediaUri ? <Video source={{ uri: mediaUri }} paused controls style={styles.audio} />
@@ -296,15 +346,28 @@ export default function ChatScreen() {
 
   const otherChats = useMemo(() => chats.filter((item) => item.id !== chatId), [chats, chatId]);
 
+  const formatDayLabel = (iso: string) => {
+    const date = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+    if (sameDay(date, today)) return 'Hoy';
+    if (sameDay(date, yesterday)) return 'Ayer';
+    const withinWeek = (today.getTime() - date.getTime()) < 7 * 24 * 60 * 60 * 1000;
+    if (withinWeek) return date.toLocaleDateString('es-ES', { weekday: 'long' });
+    return date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
   const formattedMessages = useMemo(() => {
     if (!Array.isArray(messages)) return [];
     const result: any[] = [];
     let lastDate = '';
     messages.forEach((msg) => {
-      const msgDate = new Date(msg.createdAt).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' });
-      if (msgDate !== lastDate) {
-        result.push({ type: 'DATE_SEPARATOR', date: msgDate, id: `sep-${msgDate}` });
-        lastDate = msgDate;
+      const key = new Date(msg.createdAt).toDateString();
+      if (key !== lastDate) {
+        result.push({ type: 'DATE_SEPARATOR', date: formatDayLabel(msg.createdAt), id: `sep-${key}` });
+        lastDate = key;
       }
       result.push(msg);
     });
@@ -342,6 +405,39 @@ export default function ChatScreen() {
       <Modal visible={Boolean(forwarding)} transparent animationType="slide" onRequestClose={() => setForwarding(null)}>
         <View style={styles.modalShade}><View style={styles.forwardSheet}><Text style={styles.sheetTitle}>Reenviar a…</Text><FlatList data={otherChats} keyExtractor={(item) => item.id} renderItem={({ item }) => <TouchableOpacity style={styles.forwardRow} onPress={async () => { if (forwarding) await forwardMessage(forwarding, item.id); setForwarding(null); }}><Text style={styles.forwardName}>{item.name}</Text></TouchableOpacity>} /><TouchableOpacity onPress={() => setForwarding(null)}><Text style={styles.cancel}>Cancelar</Text></TouchableOpacity></View></View>
       </Modal>
+
+      <Modal visible={reporting} transparent animationType="slide" onRequestClose={() => setReporting(false)}>
+        <View style={styles.modalShade}><View style={styles.forwardSheet}>
+          <Text style={styles.sheetTitle}>Reportar a {target?.displayName || chatName}</Text>
+          <Text style={styles.searchHint}>Describe el motivo (3–1000 caracteres). Se enviará al equipo de soporte.</Text>
+          <TextInput style={styles.reportInput} placeholder="Motivo del reporte…" placeholderTextColor="#999" value={reportText} onChangeText={setReportText} multiline autoFocus />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 14, marginTop: 12 }}>
+            <TouchableOpacity onPress={() => setReporting(false)}><Text style={styles.cancel}>Cancelar</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => void submitReport()}><Text style={[styles.cancel, { fontWeight: '700', color: '#d32f2f' }]}>Enviar reporte</Text></TouchableOpacity>
+          </View>
+        </View></View>
+      </Modal>
+
+      <Modal visible={searching} animationType="slide" onRequestClose={() => setSearching(false)}>
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <TouchableOpacity onPress={() => setSearching(false)} style={{ paddingRight: 8 }}><Icon name="arrow-back" size={24} color="#0066cc" /></TouchableOpacity>
+            <TextInput style={styles.searchInput} placeholder="Buscar en este chat…" placeholderTextColor="#999" autoFocus value={searchQuery} onChangeText={setSearchQuery} />
+          </View>
+          <FlatList
+            data={searchResults}
+            keyExtractor={(item) => idOf(item)}
+            ListEmptyComponent={<Text style={styles.searchEmpty}>{searchQuery.trim() ? 'Sin resultados' : 'Escribe para buscar mensajes en este chat.'}</Text>}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.searchRow} onPress={() => { setSearching(false); }}>
+                <Text style={styles.searchSender}>{item.senderName || ''}</Text>
+                <Text numberOfLines={3} style={styles.searchContent}>{item.content}</Text>
+                <Text style={styles.searchTime}>{new Date(item.createdAt).toLocaleString()}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -361,4 +457,6 @@ const styles = StyleSheet.create({
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, backgroundColor: '#fff' }, iconButton: { padding: 9 }, input: { flex: 1, minHeight: 40, maxHeight: 110, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: '#f1f2f3', color: '#111' }, send: { width: 42, height: 42, borderRadius: 21, marginLeft: 7, backgroundColor: '#0066cc', alignItems: 'center', justifyContent: 'center' },
   viewer: { flex: 1, backgroundColor: '#000' }, viewerBar: { paddingTop: 54, paddingHorizontal: 18, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between' },
   modalShade: { flex: 1, backgroundColor: 'rgba(0,0,0,.45)', justifyContent: 'flex-end' }, forwardSheet: { maxHeight: '70%', backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18 }, sheetTitle: { fontSize: 20, fontWeight: '700', marginBottom: 10 }, forwardRow: { paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' }, forwardName: { fontSize: 17 }, cancel: { color: '#0066cc', textAlign: 'center', padding: 15, fontWeight: '700' },
+  searchHint: { color: '#666', fontSize: 13, marginBottom: 10 }, reportInput: { minHeight: 90, maxHeight: 160, borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16, color: '#111', textAlignVertical: 'top' },
+  searchContainer: { flex: 1, backgroundColor: '#fff' }, searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#ddd' }, searchInput: { flex: 1, fontSize: 17, color: '#111' }, searchEmpty: { textAlign: 'center', color: '#999', marginTop: 40, paddingHorizontal: 30 }, searchRow: { padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' }, searchSender: { fontSize: 13, fontWeight: '700', color: '#0066cc' }, searchContent: { fontSize: 15, color: '#222', marginTop: 3 }, searchTime: { fontSize: 11, color: '#888', marginTop: 4 },
 });

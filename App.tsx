@@ -32,17 +32,10 @@ import { ActiveCallView } from './src/components/chat/ActiveCallView';
 import { fetchJson } from './src/lib/api';
 import { cacheOwnAvatar } from './src/lib/offlineFiles';
 import { User } from './src/types';
+import { RootStackParamList } from './src/types';
 
-export type RootStackParamList = {
-  Login: undefined;
-  ProfileSetup: undefined;
-  MainTabs: undefined;
-  Chat: { chatId: string; chatName: string; avatarUrl?: string; mediaToSend?: { uri: string; caption?: string; viewOnce: boolean; mime: string } };
-  ContactInfo: { chatId: string; chatName: string; avatarUrl?: string };
-  MultiMediaPicker: { chatId?: string };
-  MultiMediaEditor: { assets: any[]; chatId?: string };
-  CameraCapture: { chatId?: string };
-};
+// Re-exportado para mantener compatibilidad con `import { RootStackParamList } from '../../App'`.
+export type { RootStackParamList } from './src/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();

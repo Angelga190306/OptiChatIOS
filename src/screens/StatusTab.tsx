@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,21 +18,22 @@ import Video from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { resolveMediaUrl } from '../lib/offlineFiles';
 import { useAuthStore } from '../store/useAuthStore';
-import { Status, useStatusStore } from '../store/useStatusStore';
+import { useChatStore } from '../store/useChatStore';
+import { Status, StatusAudienceType, useStatusStore } from '../store/useStatusStore';
 
 export default function StatusTab() {
-  const user = useAuthStore(state => state.user);
-  const {
-    statuses,
-    isLoading,
-    isUploading,
-    loadStatuses,
-    createStatus,
-    deleteStatus,
-  } = useStatusStore();
+  const user = useAuthStore((state) => state.user);
+  // Selectores por campo para evitar suscribirse a todo el store (re-renders innecesarios).
+  const statuses = useStatusStore((s) => s.statuses);
+  const isLoading = useStatusStore((s) => s.isLoading);
+  const isUploading = useStatusStore((s) => s.isUploading);
+  const { loadStatuses, createStatus, deleteStatus, viewStatus, replyToStatus } = useStatusStore.getState();
   const [viewer, setViewer] = useState<Status | null>(null);
   const [draft, setDraft] = useState<Asset | null>(null);
   const [caption, setCaption] = useState('');
+  const [audience, setAudience] = useState<{ type: 'ALL_CONTACTS' | 'CONTACTS_EXCEPT' | 'ONLY_SHARE_WITH'; userIds: string[] }>({ type: 'ALL_CONTACTS', userIds: [] });
+  const [reply, setReply] = useState('');
+  const [audiencePickerOpen, setAudiencePickerOpen] = useState(false);
   useEffect(() => {
     void loadStatuses();
   }, []);
@@ -46,6 +47,7 @@ export default function StatusTab() {
     const asset = result.assets?.[0];
     if (asset?.uri) {
       setCaption('');
+      setAudience({ type: 'ALL_CONTACTS', userIds: [] });
       setDraft(asset);
     }
   };
@@ -59,14 +61,36 @@ export default function StatusTab() {
           type: draft.type || 'image/jpeg',
         },
         caption.trim(),
+        audience,
       );
       setDraft(null);
       setCaption('');
+      setAudience({ type: 'ALL_CONTACTS', userIds: [] });
     } catch (error: any) {
       Alert.alert(
         'No se pudo publicar',
         error?.message || 'Revisa la conexión.',
       );
+    }
+  };
+
+  const openStatus = (item: Status) => {
+    setViewer(item);
+    setReply('');
+    if (!item.isMine && !item.hasViewed) void viewStatus(item._id);
+  };
+
+  const sendReply = async () => {
+    if (!viewer || viewer.isMine) return;
+    const text = reply.trim();
+    if (!text) return;
+    try {
+      await replyToStatus(viewer._id, text);
+      setReply('');
+      Alert.alert('Enviado', 'Tu respuesta se envió como mensaje al contacto.');
+      setViewer(null);
+    } catch (error: any) {
+      Alert.alert('No se pudo responder', error?.message || 'Revisa la conexión.');
     }
   };
   const avatar = user?.localAvatarUri || resolveMediaUrl(user?.avatarUrl);
@@ -106,7 +130,7 @@ export default function StatusTab() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.row}
-              onPress={() => setViewer(item)}
+              onPress={() => openStatus(item)}
             >
               <Image
                 source={{
@@ -184,8 +208,16 @@ export default function StatusTab() {
             multiline
             style={styles.captionInput}
           />
+          <AudienceRow audience={audience} onOpen={() => setAudiencePickerOpen(true)} />
         </SafeAreaView>
       </Modal>
+
+      <AudiencePickerModal
+        visible={audiencePickerOpen}
+        audience={audience}
+        onChange={setAudience}
+        onClose={() => setAudiencePickerOpen(false)}
+      />
 
       <Modal
         visible={Boolean(viewer)}
@@ -239,11 +271,123 @@ export default function StatusTab() {
                 />
               )}
               <Text style={styles.caption}>{viewer.caption}</Text>
+              {viewer.isMine ? (
+                <View style={styles.viewersBox}>
+                  <Text style={styles.viewersTitle}>Vistas ({viewer.viewCount ?? (viewer.viewers?.length || 0)})</Text>
+                  {(viewer.viewers || []).length === 0 ? (
+                    <Text style={styles.viewersEmpty}>Aún nadie ha visto este estado.</Text>
+                  ) : (
+                    viewer.viewers!.map((v) => (
+                      <View key={v.userId} style={styles.viewerRow}>
+                        <Text style={styles.viewerName}>{v.displayName}</Text>
+                        <Text style={styles.viewerTime}>{new Date(v.viewedAt).toLocaleString()}</Text>
+                      </View>
+                    ))
+                  )}
+                </View>
+              ) : (
+                <View style={styles.replyBar}>
+                  <TextInput
+                    style={styles.replyInput}
+                    placeholder="Responder…"
+                    placeholderTextColor="#bbb"
+                    value={reply}
+                    onChangeText={setReply}
+                  />
+                  <TouchableOpacity style={styles.replySend} onPress={() => void sendReply()}>
+                    <Icon name="send" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              )}
             </>
           )}
         </NativeSafeAreaView>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+function audienceLabel(type: StatusAudienceType, count: number): string {
+  if (type === 'ALL_CONTACTS') return 'Todos mis contactos';
+  if (type === 'CONTACTS_EXCEPT') return `Excepto ${count}`;
+  if (type === 'ONLY_SHARE_WITH') return `Solo compartir con ${count}`;
+  return 'Todos mis contactos';
+}
+
+function AudienceRow({ audience, onOpen }: { audience: { type: StatusAudienceType; userIds: string[] }; onOpen: () => void }) {
+  return (
+    <TouchableOpacity style={styles.audienceRow} onPress={onOpen}>
+      <Icon name="people" size={20} color="#fff" />
+      <Text style={styles.audienceText}>{audienceLabel(audience.type, audience.userIds.length)}</Text>
+      <Icon name="chevron-right" size={20} color="#bbb" />
+    </TouchableOpacity>
+  );
+}
+
+function AudiencePickerModal({
+  visible, audience, onChange, onClose,
+}: {
+  visible: boolean;
+  audience: { type: StatusAudienceType; userIds: string[] };
+  onChange: (next: { type: StatusAudienceType; userIds: string[] }) => void;
+  onClose: () => void;
+}) {
+  const me = useAuthStore((s) => s.user);
+  // Los contactos se derivan de los chats 1:1 existentes (paridad con Android).
+  const chats = useChatStore((s) => s.chats);
+  const contacts = useMemo(
+    () => chats.flatMap((c) => (c.participants || []).filter((p) => p.id !== me?.id)),
+    [chats, me?.id],
+  );
+
+  const setType = (type: StatusAudienceType) => {
+    if (type === 'ALL_CONTACTS') onChange({ type, userIds: [] });
+    else onChange({ type, userIds: audience.userIds });
+  };
+  const toggle = (id: string) => {
+    const next = audience.userIds.includes(id)
+      ? audience.userIds.filter((x) => x !== id)
+      : [...audience.userIds, id];
+    onChange({ type: audience.type, userIds: next });
+  };
+
+  const typeOptions: StatusAudienceType[] = ['ALL_CONTACTS', 'CONTACTS_EXCEPT', 'ONLY_SHARE_WITH'];
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.pickerShade}>
+        <View style={styles.pickerSheet}>
+          <View style={styles.pickerHeader}>
+            <Text style={styles.pickerTitle}>Audiencia del estado</Text>
+            <TouchableOpacity onPress={onClose}><Text style={styles.pickerDone}>Listo</Text></TouchableOpacity>
+          </View>
+          {typeOptions.map((t) => (
+            <TouchableOpacity key={t} style={styles.pickerOption} onPress={() => setType(t)}>
+              <Text style={styles.pickerOptionText}>{audienceLabel(t, audience.userIds.length)}</Text>
+              {audience.type === t && <Icon name="check" size={20} color="#25D366" />}
+            </TouchableOpacity>
+          ))}
+          {audience.type !== 'ALL_CONTACTS' && (
+            <>
+              <Text style={styles.pickerSub}>
+                {audience.type === 'CONTACTS_EXCEPT' ? 'Excluir contactos' : 'Compartir solo con'}
+              </Text>
+              <FlatList
+                data={contacts}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.contactRow} onPress={() => toggle(item.id)}>
+                    <Text style={styles.contactName}>{item.displayName || item.phoneNumber}</Text>
+                    {audience.userIds.includes(item.id) && <Icon name="check" size={20} color="#25D366" />}
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={styles.pickerEmpty}>No tienes contactos aún.</Text>}
+              />
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -346,4 +490,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   caption: { color: '#fff', textAlign: 'center', padding: 20, fontSize: 16 },
+  audienceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 14 },
+  audienceText: { flex: 1, color: '#fff', fontSize: 15 },
+  pickerShade: { flex: 1, backgroundColor: 'rgba(0,0,0,.45)', justifyContent: 'flex-end' },
+  pickerSheet: { maxHeight: '80%', backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  pickerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
+  pickerDone: { color: '#0066cc', fontWeight: '700', fontSize: 16 },
+  pickerOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
+  pickerOptionText: { fontSize: 16, color: '#111' },
+  pickerSub: { color: '#666', fontWeight: '600', marginTop: 14, marginBottom: 6 },
+  pickerEmpty: { textAlign: 'center', color: '#999', marginTop: 20 },
+  contactRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f0f0f0' },
+  contactName: { fontSize: 16, color: '#111' },
+  viewersBox: { paddingHorizontal: 16, paddingBottom: 24 },
+  viewersTitle: { color: '#fff', fontWeight: '700', fontSize: 15, marginBottom: 8 },
+  viewersEmpty: { color: '#bbb', fontSize: 14 },
+  viewerRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,.15)' },
+  viewerName: { color: '#fff', fontSize: 15 },
+  viewerTime: { color: '#bbb', fontSize: 12 },
+  replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 24, gap: 8 },
+  replyInput: { flex: 1, color: '#fff', backgroundColor: 'rgba(255,255,255,.12)', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16 },
+  replySend: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#0066cc', alignItems: 'center', justifyContent: 'center' },
 });

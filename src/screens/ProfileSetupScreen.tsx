@@ -4,7 +4,8 @@ import { useAuthStore } from '../store/useAuthStore';
 import { fetchApi } from '../lib/api';
 
 export default function ProfileSetupScreen() {
-  const { updateUser } = useAuthStore();
+  // Solo necesitamos la acción; la obtenemos sin suscribirnos a todo el store.
+  const { updateUser } = useAuthStore.getState();
   const [displayName, setDisplayName] = useState('');
   const [about, setAbout] = useState('');
   const [loading, setLoading] = useState(false);

@@ -1,13 +1,12 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Dimensions, SafeAreaView, TextInput, ScrollView, Animated } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, SafeAreaView, TextInput, ScrollView, Animated, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { PinchGestureHandler, PanGestureHandler, State } from 'react-native-gesture-handler';
 import Svg, { Path } from 'react-native-svg';
-
-const { width, height } = Dimensions.get('window');
+import { useChatStore } from '../store/useChatStore';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'MultiMediaEditor'>;
 
@@ -15,14 +14,19 @@ export default function MultiMediaEditorScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<any>();
   const assets = route.params?.assets || [];
-  
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [caption, setCaption] = useState('');
-  const [viewOnce, setViewOnce] = useState(false);
+  // 0 = desactivado; 1-5 = número de vistas permitidas (viewOnceLimit del backend).
+  const [viewOnceLimit, setViewOnceLimit] = useState(0);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [paths, setPaths] = useState<string[][]>(assets.map(() => []));
-  const [currentPath, setCurrentPath] = useState<string>('');
-  
+  // `paths`/`currentPath` alimentan el overlay SVG de dibujo visible en pantalla.
+  // Las anotaciones NO se "hornean" aún en el archivo enviado: requiere
+  // `react-native-view-shot` (captureRef) que no está instalado (pendiente de
+  // verificación en dispositivo). Por eso los setters no se usan por ahora.
+  const [paths, _setPaths] = useState<string[][]>(assets.map(() => []));
+  const [currentPath, _setCurrentPath] = useState<string>('');
+
   const scale = new Animated.Value(1);
   const translateX = new Animated.Value(0);
   const translateY = new Animated.Value(0);
@@ -40,14 +44,33 @@ export default function MultiMediaEditorScreen() {
     }
   };
 
-  const handleSend = () => {
-    const asset = assets[currentIndex];
-    // In a real implementation we would render the SVG onto the image before sending.
-    // For now we just pass the viewOnce flag and caption back to ChatScreen or send directly.
-    navigation.navigate('Chat', {
-      chatId: route.params?.chatId,
-      mediaToSend: { uri: asset.image.uri, caption, viewOnce, mime: asset.type }
-    });
+  // Envía TODOS los assets seleccionados (no solo el actual). El caption se envía
+  // como un mensaje de texto independiente tras el primer medio (paridad con el
+  // flujo multi-send de Android). `viewOnce` aplica a todos los medios.
+  const handleSend = async () => {
+    const chatId = route.params?.chatId;
+    if (!chatId) {
+      navigation.goBack();
+      return;
+    }
+    const { sendMedia, sendMessage } = useChatStore.getState();
+    for (let i = 0; i < assets.length; i++) {
+      const asset = assets[i];
+      const uri = asset?.image?.uri;
+      if (!uri) continue;
+      const mime = asset.type || 'image/jpeg';
+      const name = asset.filename || `media-${Date.now()}-${i}`;
+      try {
+        await sendMedia(chatId, uri, name, mime, {
+          viewOnce: viewOnceLimit > 0,
+          viewOnceLimit: viewOnceLimit > 0 ? viewOnceLimit : undefined,
+        });
+        if (i === 0 && caption.trim()) await sendMessage(chatId, caption.trim());
+      } catch (error) {
+        console.warn('No se pudo enviar un medio del editor', error);
+      }
+    }
+    navigation.navigate('Chat', { chatId });
   };
 
   return (
@@ -58,13 +81,13 @@ export default function MultiMediaEditorScreen() {
           <Icon name="close" size={28} color="#fff" />
         </TouchableOpacity>
         <View style={styles.toolIcons}>
-          <TouchableOpacity style={styles.iconButton}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Recorte', 'El recorte aún no está disponible en iOS.')}>
             <Icon name="crop" size={24} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Emoji', 'Los stickers/emoji requieren horneado de anotaciones (pendiente).')}>
             <Icon name="happy-outline" size={24} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert('Texto', 'El texto sobre la imagen requiere horneado de anotaciones (pendiente).')}>
             <Icon name="text" size={24} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setIsDrawing(!isDrawing)} style={styles.iconButton}>
@@ -119,9 +142,14 @@ export default function MultiMediaEditorScreen() {
               value={caption}
               onChangeText={setCaption}
             />
-            <TouchableOpacity onPress={() => setViewOnce(!viewOnce)} style={[styles.viewOnceBtn, viewOnce && styles.viewOnceActive]}>
-              <Icon name="timer-outline" size={20} color={viewOnce ? "#fff" : "#999"} />
-              <Text style={[styles.viewOnceText, viewOnce && styles.viewOnceTextActive]}>1</Text>
+            <TouchableOpacity
+              onPress={() => setViewOnceLimit((n) => (n >= 5 ? 0 : n + 1))}
+              style={[styles.viewOnceBtn, viewOnceLimit > 0 && styles.viewOnceActive]}
+            >
+              <Icon name="timer-outline" size={20} color={viewOnceLimit > 0 ? "#fff" : "#999"} />
+              <Text style={[styles.viewOnceText, viewOnceLimit > 0 && styles.viewOnceTextActive]}>
+                {viewOnceLimit > 0 ? viewOnceLimit : 1}
+              </Text>
             </TouchableOpacity>
           </View>
           <TouchableOpacity onPress={handleSend} style={styles.sendButton}>

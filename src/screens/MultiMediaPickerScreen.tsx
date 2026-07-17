@@ -17,7 +17,7 @@ export default function MultiMediaPickerScreen() {
   const route = useRoute<any>();
   const [photos, setPhotos] = useState<PhotoIdentifier[]>([]);
   const [selected, setSelected] = useState<PhotoIdentifier[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadPhotos();
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: '100%', resizeMode: 'cover' },
   videoBadge: { position: 'absolute', bottom: 5, left: 5, flexDirection: 'row', alignItems: 'center' },
   videoDuration: { color: '#fff', fontSize: 12, marginLeft: 3 },
-  selectedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  selectedOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   badge: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#25D366', justifyContent: 'center', alignItems: 'center' },
   badgeText: { color: '#fff', fontWeight: 'bold' },
 });

@@ -1,5 +1,4 @@
 import messaging from '@react-native-firebase/messaging';
-import { Alert } from 'react-native';
 import { getApiUrl } from './api';
 
 /**
@@ -36,13 +35,13 @@ export const PushNotificationService = {
    */
   async updateTokenOnBackend(token: string, accessToken: string) {
     try {
-      await fetch(`${getApiUrl('/users/me/fcm-token')}`, {
-        method: 'POST',
+      await fetch(`${getApiUrl('/users/fcm-token')}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ fcmToken: token }),
       });
     } catch (error) {
       console.error('Error updating FCM token on backend:', error);

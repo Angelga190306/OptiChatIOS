@@ -3,6 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from './useAuthStore';
 import { useChatStore } from './useChatStore';
 import { cacheMessageFile } from '../lib/offlineFiles';
+import { fetchJson } from '../lib/api';
+import { getDeviceId, getDeviceModel } from '../lib/device';
 import { Message } from '../types';
 
 interface SocketState {
@@ -13,6 +15,7 @@ interface SocketState {
   connect: (force?: boolean) => void;
   disconnect: () => void;
   reconnectForNetwork: () => void;
+  reportScreenshot: (conversationId: string, messageId?: string) => Promise<void>;
 }
 
 const bindChatEvents = (socket: Socket) => {
@@ -55,28 +58,41 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     current?.removeAllListeners();
     current?.disconnect();
 
-    const socket = io('https://optichat.optishieldx.com', {
-      path: '/socket.io',
-      auth: { token },
-      transports: ['websocket'],
-      autoConnect: false,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 15000,
-      timeout: 15000,
-    });
-    bindChatEvents(socket);
-    socket.on('connect', () => {
-      set({ connected: true, lastError: null });
-      useChatStore.getState().setOnline(true);
-      void useChatStore.getState().flushOutbox();
-      void useChatStore.getState().loadChats();
-    });
-    socket.on('disconnect', () => set({ connected: false }));
-    socket.on('connect_error', (error) => set({ connected: false, lastError: error.message }));
-    set({ socket, activeToken: token, connected: false });
-    socket.connect();
+    // Se construye el socket de forma asíncrona para poder adjuntar el deviceId
+    // (AsyncStorage es async). El backend desconecta sockets sin deviceId válido.
+    void (async () => {
+      const deviceId = await getDeviceId();
+      const socket = io('https://optichat.optishieldx.com', {
+        path: '/socket.io',
+        auth: {
+          token,
+          deviceId,
+          deviceModel: getDeviceModel(),
+          deviceLocation: '0.0,0.0',
+        },
+        transports: ['websocket'],
+        autoConnect: false,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 15000,
+        timeout: 15000,
+      });
+      bindChatEvents(socket);
+      socket.on('connect', () => {
+        set({ connected: true, lastError: null });
+        useChatStore.getState().setOnline(true);
+        void useChatStore.getState().flushOutbox();
+        void useChatStore.getState().loadChats();
+        // Marca la conversación activa como entregada al reconectar (receipt).
+        const activeChatId = useChatStore.getState().activeChatId;
+        if (activeChatId) void useChatStore.getState().markDelivered(activeChatId);
+      });
+      socket.on('disconnect', () => set({ connected: false }));
+      socket.on('connect_error', (error) => set({ connected: false, lastError: error.message }));
+      set({ socket, activeToken: token, connected: false });
+      socket.connect();
+    })();
   },
 
   reconnectForNetwork: () => {
@@ -91,12 +107,16 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     set({ socket: null, activeToken: null, connected: false });
   },
 
-  reportScreenshot: (conversationId: string, messageId?: string) => {
-    const socket = get().socket;
-    if (socket && socket.connected) {
-      socket.emit('screenshot_taken', { conversationId, messageId });
-    } else {
-      console.warn('Socket not connected, cannot report screenshot');
+  reportScreenshot: async (conversationId, messageId) => {
+    if (!messageId) return;
+    // El backend no expone un evento Socket.IO para reportar capturas; usa REST.
+    try {
+      await fetchJson(`/chats/${conversationId}/messages/${messageId}/view-once/screenshot-attempt`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.warn('No se pudo reportar la captura de pantalla al remitente', error);
     }
   },
 

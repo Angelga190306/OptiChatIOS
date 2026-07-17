@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, FlatList } from 'react-native';
 import { useAuthStore } from '../store/useAuthStore';
 import { fetchApi } from '../lib/api';
+import { getDeviceId, getDeviceModel } from '../lib/device';
 
 const COUNTRIES = [
   { name: 'México', code: '+52', flag: '🇲🇽' },
@@ -66,12 +67,17 @@ export default function LoginScreen() {
       setLoading(true);
       setError('');
       const formattedPhone = selectedCountry.code + phoneNumber;
+      const deviceId = await getDeviceId();
       const res = await fetchApi('/auth/verify-code', {
         method: 'POST',
-        body: JSON.stringify({ 
-          phoneNumber: formattedPhone, 
+        headers: {
+          'x-device-id': deviceId,
+          'x-device-model': getDeviceModel(),
+        },
+        body: JSON.stringify({
+          phoneNumber: formattedPhone,
           code: otp,
-          deviceName: "OptiChat iOS" 
+          deviceName: "OptiChat iOS"
         }),
       });
       
